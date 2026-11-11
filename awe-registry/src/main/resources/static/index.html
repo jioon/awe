@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AWE · 模型生产与发布</title>
+<style>
+:root{font-family:Inter,"Segoe UI",system-ui,sans-serif;background:#f4f7fb;color:#17263b}
+*{box-sizing:border-box}body{margin:0}header{background:#10253d;color:white;padding:24px max(24px,5vw)}
+header h1{margin:0 0 7px;font-size:25px}header p{margin:0;color:#bed1e7;font-size:13px}
+main{max-width:1380px;margin:20px auto;padding:0 18px}
+.layout{display:grid;grid-template-columns:280px 1fr;gap:16px}
+.panel{background:white;border:1px solid #dbe3ed;border-radius:12px;padding:18px;min-width:0}
+h2{font-size:16px;margin:0 0 14px}h3{font-size:14px}
+label{display:block;font-size:12px;color:#516178;margin:10px 0 5px}
+input,select,textarea{width:100%;border:1px solid #b9c7d7;border-radius:7px;padding:9px;font:inherit;font-size:13px;background:white;color:#17263b}
+textarea{min-height:300px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;line-height:1.45}
+button{padding:9px 12px;border:1px solid #bfd0e0;border-radius:7px;background:#f8fbff;color:#1b385b;cursor:pointer;font-weight:600}
+button:hover{background:#e8f1fb}.primary{background:#1257b2;color:white;border-color:#1257b2}
+.primary:hover{background:#0b468f}.danger{color:#a42a32}.section{margin-top:16px}
+.item{border:1px solid #e1e8f0;border-radius:8px;padding:11px;margin:7px 0;cursor:pointer}
+.item:hover{border-color:#5395dd;background:#f8fbff}.item small{display:block;color:#637590;margin-top:5px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.tabs{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 17px}
+.tab.active{background:#102b4e;color:#fff}.badge{display:inline-block;border-radius:12px;padding:2px 8px;font-size:11px;background:#ebf1f7;color:#2d506f}
+pre{overflow-wrap:anywhere;white-space:pre-wrap;font-size:12px;background:#f5f8fb;padding:14px;border-radius:8px;max-height:400px;overflow:auto}
+#message{font-size:13px;color:#4e5e71;min-height:18px}#message.error{color:#af2538}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.hidden{display:none}.muted{color:#73829a;font-size:12px}
+@media(max-width:880px){.layout,.grid{grid-template-columns:1fr}}
+</style></head><body>
+<header><h1>AWE · 领域模型工作台</h1><p>真实 PostgreSQL 模型注册 · 审核与不可变发布 · 来源绑定与依赖影响 · 不连接数据库时不会显示伪造模型</p></header>
+<main><div class="layout">
+<aside class="panel">
+<h2>接入身份</h2>
+<label>当前授权凭据（只保存在页面内存中，刷新后清除）</label>
+<input id="token" type="password" autocomplete="off" placeholder="粘贴 Author 或 Reviewer Token">
+<div class="actions"><button id="refresh">加载真实资产</button></div>
+<div class="section"><h2>领域</h2><div id="domains"></div><button onclick="showDomainForm()">+ 新建领域</button></div>
+<div class="section"><h2>已发布模型</h2><div id="releases"></div></div>
+<div class="section"><h2>工作流草稿</h2><div id="drafts"></div></div>
+</aside>
+<section class="panel">
+<div class="row"><h2 id="title">模型资产与发布</h2><span id="status" class="badge">未连接</span></div>
+<div class="tabs">
+<button class="tab active" data-view="overview">概览</button>
+<button class="tab" data-view="create">新建草稿</button>
+<button class="tab" data-view="inspect">资产详情</button>
+<button class="tab" data-view="impact">影响分析</button>
+</div>
+<div id="message"></div>
+<div id="overview">
+<p>这里是 AWE F1 的实际建模入口。先创建领域，再创建实体草稿；经过类型校验、提交审核和独立 Reviewer 凭据批准后，才可以发布不可变版本。</p>
+<p>发布时检查依赖实体是否已经发布，并记录来源系统的资产引用和指纹。<strong>来源绑定初期为未校验状态，不能冒充已经完成与生产 BI/Hive 的实时对账。</strong></p>
+<div class="grid"><div><h3>发布状态</h3><pre id="counts">需要连接数据库</pre></div>
+<div><h3>关键安全边界</h3><p class="muted">默认只绑定本地回环地址；API 需两个不同的 Bootstrap Token；未配置时拒绝全部 API 请求。上线前需要企业 OIDC、领域级 RBAC 和 HTTPS。</p></div></div>
+</div>
+<div id="create" class="hidden">
+<div class="grid"><div><label>领域代码</label><input id="domain" value="video"></div>
+<div><label>实体类型</label><select id="type">
+<option>BusinessEntity</option><option>BusinessEvent</option><option selected>Dataset</option>
+<option>Metric</option><option>Dimension</option><option>Feature</option><option>Pipeline</option><option>DataProduct</option>
+</select></div></div>
+<label>规范实体 ID，例如 dataset.video.activity_events</label><input id="entity" value="dataset.video.activity_events">
+<label>模型契约 JSON（草稿可不完整，提交审核时严格校验）</label>
+<textarea id="spec"></textarea>
+<div class="actions"><button onclick="fillTemplate()">填入示例结构</button><button class="primary" onclick="createDraft()">保存真实草稿</button></div>
+</div>
+<div id="inspect" class="hidden"><div id="details">选择一个真实草稿或已发布版本。</div></div>
+<div id="impact" class="hidden"><label>被依赖的实体 ID</label><input id="impactEntity" value="dataset.video.activity_events">
+<button onclick="showImpact()">查看直接下游</button><pre id="impactOutput">等待查询</pre></div>
+</section></div></main>
+<script>
+let token='',current=null,currentKind='',editingDraftId=null;
+const $=id=>document.getElementById(id);
+const view=v=>{
+  for(const name of ['overview','create','inspect','impact']) $(name).classList.toggle('hidden',name!==v);
+  document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
+};
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>view(b.dataset.view));
+const escapeHtml=s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+function notice(s,error=false){$('message').textContent=s;$('message').className=error?'error':''}
+async function api(path,method='GET',body=null){
+  token=$('token').value.trim();
+  if(!token)throw Error('请先填写 Author 或 Reviewer Token');
+  const opts={method,headers:{'Authorization':'Bearer '+token}};
+  if(body!==null){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body)}
+  const r=await fetch('/api'+path,opts);
+  const text=await r.text();let data;try{data=JSON.parse(text)}catch(e){data={message:text}};
+  if(!r.ok)throw Error((data.message||data.error||r.statusText)+' (HTTP '+r.status+')');
+  return data;
+}
+async function safe(fn){try{notice('');await fn()}catch(e){notice(e.message,true)}}
+function card(label,sub,action){
+  const el=document.createElement('div');el.className='item';
+  const a=document.createElement('strong');a.textContent=label;el.appendChild(a);
+  const b=document.createElement('small');b.textContent=sub;el.appendChild(b);
+  el.onclick=action;return el;
+}
+async function refresh(){
+ await safe(async()=>{
+   const [domains,releases,drafts]=await Promise.all([api('/domains'),api('/releases'),api('/drafts')]);
+   $('domains').replaceChildren();domains.forEach(x=>$('domains').appendChild(card(x.code,x.owner_team,()=>{$('domain').value=x.code;view('create')})));
+   $('releases').replaceChildren();releases.forEach(x=>$('releases').appendChild(card(x.entity_id,'v'+x.version+' · '+x.entity_type,()=>loadDetail(x.id,'release'))));
+   $('drafts').replaceChildren();drafts.forEach(x=>$('drafts').appendChild(card(x.entity_id,x.state+' · r'+x.revision,()=>loadDetail(x.id,'draft'))));
+   $('status').textContent='连接成功';
+   $('counts').textContent=JSON.stringify({domains:domains.length,publishedModels:releases.length,drafts:drafts.length},null,2);
+ });
+}
+$('refresh').onclick=refresh;
+function showDomainForm(){
+ const code=prompt('领域代码（小写英文字母、数字和下划线）');
+ if(!code)return;const name=prompt('领域显示名称')||code;const owner=prompt('负责团队')||'unknown';
+ safe(async()=>{await api('/domains','POST',{code,displayName:name,ownerTeam:owner});await refresh()});
+}
+function fillTemplate(){
+ const domain=$('domain').value.trim()||'video',type=$('type').value;
+ const idPrefix={BusinessEntity:'entity',BusinessEvent:'event',Dataset:'dataset',Metric:'metric',Dimension:'dimension',Feature:'feature',Pipeline:'pipeline',DataProduct:'product'}[type];
+ $('entity').value=idPrefix+'.'+domain+'.example';
+ const spec={name:'示例名称',definition:'请由领域数仓负责人确认业务含义',ownerTeam:domain+'_dw_team'};
+ if(['Dataset','Metric','Feature'].includes(type)){
+  spec.grain={keys:['user_id','business_date']};
+  spec.time={field:'business_date',role:'BUSINESS_DATE',zone:'Asia/Shanghai'};
+ }
+ if(type==='Dataset')spec.bindings=[{sourceSystem:'hive',externalRef:'hive.dwd_example',fingerprint:'MANUAL_UNVERIFIED'}];
+ if(type==='Metric'){spec.subjectRef='entity.'+domain+'.user';spec.datasetRef='dataset.'+domain+'.activity_events';spec.measure={kind:'COUNT_DISTINCT',field:'user_id'};}
+ if(type==='Pipeline'){spec.inputs=[];spec.outputs=[];}
+ $('spec').value=JSON.stringify(spec,null,2);
+}
+fillTemplate();
+async function createDraft(){
+ await safe(async()=>{
+   const spec=JSON.parse($('spec').value);
+   const row=editingDraftId ? await api('/drafts/'+editingDraftId,'PUT',{spec}) : await api('/drafts','POST',{domain:$('domain').value.trim(),entityId:$('entity').value.trim(),entityType:$('type').value,spec}); editingDraftId=null;
+   notice('草稿已保存：'+row.id);await refresh();await loadDetail(row.id,'draft');
+ });
+}
+async function loadDetail(id,kind){
+ await safe(async()=>{
+  const r=await api(kind==='draft'?'/drafts/'+id:'/releases/'+id);
+  current=r;currentKind=kind;view('inspect');
+  const box=$('details');box.replaceChildren();
+  const heading=document.createElement('h3');heading.textContent=r.entity_id+' · '+(r.state||('v'+r.version));box.appendChild(heading);
+  const metadata=document.createElement('p');metadata.className='muted';metadata.textContent=r.entity_type+' · '+r.domain+' · '+(r.content_hash||'未发布');box.appendChild(metadata);
+  const pre=document.createElement('pre');pre.textContent=JSON.stringify(r.spec,null,2);box.appendChild(pre);
+  if(kind==='release'){
+   const rpre=document.createElement('pre');rpre.textContent='依赖关系：\n'+JSON.stringify(r.relations,null,2)+'\n来源绑定：\n'+JSON.stringify(r.bindings,null,2);box.appendChild(rpre);
+  }else{
+   const actions=document.createElement('div');actions.className='actions';box.appendChild(actions);
+   const add=(text,cb)=>{const b=document.createElement('button');b.textContent=text;b.onclick=cb;actions.appendChild(b)};
+   if(r.state==='DRAFT'){
+     add('提交审核',()=>mutate('/drafts/'+id+'/submit'));
+     add('打开草稿编辑',()=>{$('domain').value=r.domain;$('type').value=r.entity_type;$('entity').value=r.entity_id;$('spec').value=JSON.stringify(r.spec,null,2);editingDraftId=id;view('create');notice('正在编辑草稿 '+id+'，保存将更新原草稿。')});
+   }
+   if(r.state==='IN_REVIEW')add('审核通过（Reviewer）',()=>mutate('/drafts/'+id+'/approve'));
+   if(r.state==='APPROVED')add('发布版本（Reviewer）',()=>{const version=prompt('不可变语义版本，例如 1.0.0');if(version)mutate('/drafts/'+id+'/publish',{version})});
+  }
+ });
+}
+async function mutate(path,body){await safe(async()=>{await api(path,'POST',body||{});notice('操作成功');await refresh();if(current)await loadDetail(current.id,'draft')})}
+async function showImpact(){await safe(async()=>{$('impactOutput').textContent=JSON.stringify(await api('/impact?entityId='+encodeURIComponent($('impactEntity').value)),null,2)})}
+</script></body></html>
