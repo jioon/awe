@@ -57,3 +57,8 @@ MCP/API 必须鉴权；数据库/BI/调度服务端重新验权。受限 Link、
 ## ADR-013 类型化发布与真实来源 Gate
 
 见 [类型化发布边界、来源观测与兼容性 Gate](adr-013-typed-registry-and-source-gates.md)。明确元数据校验、治理发布和真实任务验证的边界，以及仍待完成的生产闭环。
+
+
+## ADR-014 Agent Skills 与真实数据验证闭环
+
+见 [Agent Skills 与版本化数据验证、修复回放](adr-014-agent-skills-and-data-verification-loop.md)。明确外部自定义流程、受控运行、实际数据证据和修复回放的边界；首个只读纵切面不替代完整 F1/F2/F3 验收。

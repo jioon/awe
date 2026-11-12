@@ -1,21 +1,37 @@
 # AWE — Analytical World Engine
 
-Long-lived Java engineering project for an AI-native data warehouse: typed and versioned domain/analytical/engineering models, governed compilation and derivation, authoritative physical bindings, evidence, and task-driven capability evolution. Agent frameworks are external consumers; AWE is not another LLM agent.
+AWE is the shared modeling, production, consumption and verification foundation for an AI-native data warehouse. Immutable entities, semantic models, contracts and capabilities connect existing tables, SQL, jobs and reports to governed releases and inspectable evidence. Hive, Spark, BI and scheduling systems retain their execution and storage roles.
 
-## Build
-JDK 21 and Maven 3.9+: `mvn -B -ntp verify`.
+The product target includes at least the F3 warehouse improvement loop: a real task uses an exact model release, a failed obligation produces evidence, an authorized change fixes the actual warehouse, and the original checks are replayed before closure. This repository develops that product incrementally; individual vertical slices do not establish completion of every stage.
+
+## Build and development
+
+Use a full JDK 21, Maven 3.9+ and PostgreSQL for integration tests. From the repository root:
+
+```sh
+mvn -B -ntp spotless:apply
+mvn -B -ntp spotless:check verify
+```
+
+Spotless uses Google Java Format in AOSP style with four-space Java indentation. CI enforces formatting and requires executed PostgreSQL/HTTP integration tests. Runtime setup, configuration and API examples are in the [Registry guide](awe-registry/README.md).
 
 ## Current implementation
-The Java 21 kernel defines seven model families. The PostgreSQL Registry, HTTP API and Web workbench share their strict versioned representation, enforce immutable releases and versioned dependencies, and gate publication on model compatibility and fresh source metadata checks. Hive/BI imports use an extensible metadata gateway adapter; unconfigured sources explicitly return `NOT_CONFIGURED`.
 
-This is an increment toward the production AWE product. It does not yet execute warehouse tasks, prove row-level quality or BI numerical equivalence, or complete a repair/replay workflow. Local gateway fixtures validate the adapter protocol without claiming an enterprise Hive/BI connection. See the [Registry setup and API](awe-registry/README.md) and [ADR-013](docs/architecture/adr-013-typed-registry-and-source-gates.md).
+- Seven Java model families share the Registry, strict v2 documents and Web workbench. Releases pin dependency versions, hashes and source provenance; metadata and compatibility checks gate publication.
+- Configured Hive/BI metadata gateways provide immutable observations. Missing configuration returns `NOT_CONFIGURED`; protocol fixtures do not claim an enterprise connection.
+- A registered read-only data-check runtime consumes exact Dataset and Contract releases, checks fresh metadata, and validates actual rows in an administrator-mapped PostgreSQL relation. Runs preserve transaction snapshot references, coverage limits and violations.
+- Failed data obligations create runtime gaps. After an external repair of the actual data, replay reuses the same pinned model and contract; only successful matching checks against the same bound data scope close the corresponding gap. Completed run evidence stays immutable.
 
-Read [architecture decisions](docs/architecture/decisions.md), [failure modes](docs/architecture/guardrails.md), [scenario matrix](docs/architecture/scenario-matrix.md) and [delivery plan](docs/roadmap.md). The next product milestone is a real domain's source-to-model-to-task validation and repair loop, built on this Registry.
+This runtime is a bounded verification capability. Native Hive/Spark/BI execution, the full Resolver/Semantic IR query path, production job/DDL/SQL integration, enterprise identity and cross-consumer regression remain future work. It does not execute arbitrary caller SQL, scripts, Actions or warehouse writes.
 
-## Non-negotiable
-- Semantic identity, physical identity and runtime facts are distinct.
-- Grain, identity, time and aggregation rules are first-class typed contracts.
-- User-supplied text/LLM output can propose candidates but never become authoritative data semantics or permissions.
-- A missing catalog hit is UNKNOWN unless coverage is explicitly certified complete.
-- Authorization, readiness, verifiability and task completion are separate states.
-- Model publishing and changes must be checked against actual warehouse bindings.
+## Agent Skills and custom workflows
+
+Agents can keep Skills and workflows in their own repositories or platforms, combine business steps, and call AWE's stable APIs with explicit release IDs and content hashes. AWE owns server-side authorization, registered checks, model/source validation and evidence. A custom Skill cannot turn missing configuration, incomplete coverage or a failed proof obligation into a successful execution.
+
+See [ADR-014: Agent Skills and the data verification loop](docs/architecture/adr-014-agent-skills-and-data-verification-loop.md), [ADR-013: typed source gates](docs/architecture/adr-013-typed-registry-and-source-gates.md), the [architecture decisions](docs/architecture/decisions.md), [guardrails](docs/architecture/guardrails.md), [scenario matrix](docs/architecture/scenario-matrix.md) and [roadmap](docs/roadmap.md).
+
+## Code boundaries
+
+The framework-independent kernel separates `model`, `contract`, `identity`, `release` and `capability`. The application separates `api`, `authoring`, `model`, `audit`, `support`, `source` and `runtime`. Keeping the sealed metamodel in one package preserves its closed type boundary; protocol, persistence and execution adapters do not enter the kernel.
+
+Semantic identity, physical implementation, source observations, run evidence and task completion remain separate facts. Model approval is governance; a scoped check is evidence for its named obligation, not absolute business truth.
