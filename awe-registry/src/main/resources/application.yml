@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: awe-registry
+  datasource:
+    url: ${AWE_DB_URL:jdbc:postgresql://127.0.0.1:5432/awe}
+    username: ${AWE_DB_USER:awe}
+    password: ${AWE_DB_PASSWORD:}
+  flyway:
+    enabled: true
+server:
+  port: ${AWE_PORT:8090}
+  address: ${AWE_BIND_ADDRESS:127.0.0.1}
+awe:
+  auth:
+    author-token: ${AWE_AUTHOR_TOKEN:}
+    reviewer-token: ${AWE_REVIEWER_TOKEN:}
