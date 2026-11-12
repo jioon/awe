@@ -27,6 +27,21 @@ class MetamodelContractsTest {
         assertInstanceOf(AweDefinition.class,type);
     }
 
+    @Test void objectIdentityCannotBeNullable() {
+        assertThrows(IllegalArgumentException.class,() -> new ObjectType(user,
+            ObjectType.Family.BUSINESS_ENTITY,"User",
+            List.of(new ObjectType.Property("user_id",ObjectType.DataType.STRING,false,false)),
+            List.of("user_id")));
+    }
+
+    @Test void featureCannotConflateObservationWithDataAvailability() {
+        var time=new TemporalContract(Set.of(TemporalContract.TimeRole.EVENT_TIME,
+            TemporalContract.TimeRole.AVAILABLE_AT),ZoneId.of("Asia/Shanghai"),true);
+        assertThrows(IllegalArgumentException.class,() -> new SemanticModel.Feature(
+            ref("feature.video.active_days"),new Grain(List.of("user_id"),Grain.GrainKind.FEATURE),
+            time,user,events,"event_time","event_time"));
+    }
+
     @Test void linkTypeRequiresJoinCardinalityAndTemporalMeaning() {
         var safe=new LinkType(ref("link.video.user_dimension"),events,user,
             LinkType.Meaning.HAS_DIMENSION, RelationContract.Cardinality.MANY_TO_ONE,

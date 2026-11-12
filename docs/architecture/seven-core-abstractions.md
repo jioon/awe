@@ -1,6 +1,6 @@
 # AWE 七类核心抽象与类型层级
 
-F0/F1a 已实现了 EntityRef/Grain/TemporalContract/RelationContract 等基础字段和 Registry，但并未实现核心七类抽象。此增量将它们作为 **Java 21 sealed metamodel** 正式引入，仍属基础内核，不宣称完成所有可执行规则。
+F0/F1a 建立基础契约与 PostgreSQL Registry；七类抽象随后进入 **Java 21 sealed metamodel**。F1b 将同一组内核记录贯穿严格文档解码、模型校验、不可变发布和 Web 工作台；能力执行与真实数据验证仍按各阶段建设，不因类型已发布而自动成立。发布边界及历史迁移见 [ADR-013](adr-013-typed-registry-and-source-gates.md)。
 
 ## 正式顶层分类
 
@@ -22,17 +22,18 @@ F0/F1a 已实现了 EntityRef/Grain/TemporalContract/RelationContract 等基础�
 - **LinkType 和 RelationContract 不是重复权威。** LinkType 定义可发布关系；RelationContract 是编译时的 Join Safety 约束；关系边不是天然可 JOIN 的 SQL。
 - **Action 与 Function 在类型层面断开。** 能力执行时还必须进行当前身份、源系统、审批、安全和资源预算检查；仅有声明不授予权限。
 - **Evidence 绑定验证范围与数据快照。** 没有独立校验的数据即使已通过业务认证，也不能伪装成绝对真值。
-- **当前 F1a Registry 仍使用 JSON 编辑和基本字段校验。** 这套七类 Java 类型尚未完全贯穿 Registry 持久化/REST/API 和 Schema 版本升级，这是下一项必做的工程集成，不应以类型已创建冒充整体实现完成。
+- **Registry v2 文档直接映射七类 Java 类型。** `entityType` 选择具体记录类型，`spec.schemaVersion=2`，`spec.model` 包含该记录的完整字段和精确版本 `ref`；未知字段和不受支持的语义失败关闭。旧发布只读保留；旧草稿需作者明确补全，不能猜测身份或时间字段进行自动迁移。
+- **已发布不等于可执行或数据已验证。** 发布依赖绑定精确版本与 Hash，来源验证记录自己的范围；Function/Action 仍需受控执行器，Contract 的未来阶段义务不能冒充已运行，Evidence 不能由作者任意声明 `PASSED` 来提升来源权威。
 
 ## 为什么避免一开始强制所有复杂业务进入七类
 
 这七类定义 AWE 元架构的演进边界，不意味业务数仓团队需要学习七类对象并逐一填写。
-数仓建模入口继续围绕 BusinessEntity、Fact/Dataset、Metric、Dimension、Feature、Pipeline、DataProduct；
-Web 和 CI 将自动生成/关联 Function、Contract、Evidence，以及 Action 的候选要求。
+数仓建模入口继续围绕业务对象、Fact/Dataset、Metric、Dimension、Feature、Pipeline、DataProduct；对象型定义使用 `ObjectType.family`，语义计算使用 `SemanticModel` 的具体分支。维度使用 `ObjectType` 的 `DIMENSION` 家族和 `dimension.<domain>.<name>` ID；语义模型的维度引用必须解析到正确的已发布家族。
+工作台提供七类文档模板和依赖/来源/校验视图；模板只是填写结构，不会自动确认业务含义或创建通过验证的 Evidence。
 另须明确不支持的语义类型应失败关闭，不能利用自定义 JSON 片段绕过规则。
 
 ## 本轮验收
 
-Java CI 的正反契约测试覆盖对象身份、关联扇出、DAU 去重聚合、特征历史可用性、Function/Action 区分、Contract 阶段校验、Evidence 盲区与 sealed 家族闭合。
+Java CI 的正反契约测试覆盖对象身份、关联扇出、DAU 去重聚合、特征历史可用性、Function/Action 区分、Contract 阶段校验、Evidence 盲区与 sealed 家族闭合；PostgreSQL/HTTP 集成测试覆盖同一类型从建模到发布和来源漂移 Gate 的路径。
 
-**下一项核心工程工作：从完整元模型到类型化发布表示、Schema Evolution 和模型迁移，不应跳跃到 Agent Resolver。**
+**后续关键门槛：真实 Hive/BI 来源与领域模型验收、任务消费精确发布模型、运行验证及修复回放。** 在这些路径可证明前，不能以 Resolver、Agent 演示或 Registry 页面替代数仓生产消费闭环。

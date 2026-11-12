@@ -1,15 +1,25 @@
 package ai.awe.registry;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
 @Component public final class JsonDocuments {
-  private final ObjectMapper mapper=new ObjectMapper();
+  private final ObjectMapper mapper=new ObjectMapper()
+      .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+      .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+      .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+      .enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS);
   public JsonNode parse(String json) {
-    try { return mapper.readTree(json); }
+    try {
+      var node=mapper.readTree(json);
+      if(node==null || node.isMissingNode()) throw new IllegalArgumentException("Empty JSON document");
+      return node;
+    }
     catch(Exception e) { throw new IllegalArgumentException("Invalid JSON document",e); }
   }
   public ObjectNode object(String json) {
@@ -34,6 +44,9 @@ import java.util.*;
       node.forEach(v->values.add(canonical(v)));
       return "["+String.join(",",values)+"]";
     }
+    // Preserve numeric value exactly, independent of source notation and JSONB scale.
+    // Scientific notation avoids materializing enormous strings for sparse exponents.
+    if(node.isNumber()) return node.decimalValue().stripTrailingZeros().toString();
     return node.toString();
   }
   public String sha256(JsonNode node) {

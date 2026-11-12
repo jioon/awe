@@ -32,8 +32,16 @@ public final class RegistryApi {
   @PostMapping("/drafts/{id}/publish") public String publish(@PathVariable UUID id,@RequestBody String body,HttpServletRequest request) {
     return json.write(registry.publish(id,json.object(body),actor(request)));
   }
+  @PostMapping("/drafts/{id}/validate") public String validate(@PathVariable UUID id,HttpServletRequest request) {
+    return json.write(registry.validateDraft(id,actor(request)));
+  }
   @GetMapping("/releases") public String releases(){return json.write(registry.releases());}
   @GetMapping("/releases/{id}") public String release(@PathVariable UUID id){return json.write(registry.release(id));}
+  @PostMapping("/releases/{id}/verify") public String verify(@PathVariable UUID id,HttpServletRequest request) {
+    return json.write(registry.verifyRelease(id,actor(request)));
+  }
+  @GetMapping("/gaps") public String gaps(){return json.write(registry.gaps());}
+  @GetMapping("/validation-checks") public String checks(@RequestParam String entityId){return json.write(registry.validationChecks(entityId));}
   @GetMapping("/impact") public String impact(@RequestParam String entityId){return json.write(registry.impact(entityId));}
   @GetMapping("/audit") public String audit(@RequestParam String entityId){return json.write(registry.auditTrail(entityId));}
 }

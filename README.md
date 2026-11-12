@@ -5,10 +5,12 @@ Long-lived Java engineering project for an AI-native data warehouse: typed and v
 ## Build
 JDK 21 and Maven 3.9+: `mvn -B -ntp verify`.
 
-## This increment
-The first **production-oriented foundation** is a framework-independent kernel of immutable contracts and executable invariants, verified by automated CI tests. It does **not** claim to implement the full service. We are deliberately not shipping another mock SQL/LLM demo.
+## Current implementation
+The Java 21 kernel defines seven model families. The PostgreSQL Registry, HTTP API and Web workbench share their strict versioned representation, enforce immutable releases and versioned dependencies, and gate publication on model compatibility and fresh source metadata checks. Hive/BI imports use an extensible metadata gateway adapter; unconfigured sources explicitly return `NOT_CONFIGURED`.
 
-Read [architecture decisions](docs/architecture/decisions.md), [failure modes](docs/architecture/guardrails.md), [scenario matrix](docs/architecture/scenario-matrix.md) and [delivery plan](docs/roadmap.md). The next incremental implementation is a real versioned model registry with PostgreSQL, workflow and Web UI.
+This is an increment toward the production AWE product. It does not yet execute warehouse tasks, prove row-level quality or BI numerical equivalence, or complete a repair/replay workflow. Local gateway fixtures validate the adapter protocol without claiming an enterprise Hive/BI connection. See the [Registry setup and API](awe-registry/README.md) and [ADR-013](docs/architecture/adr-013-typed-registry-and-source-gates.md).
+
+Read [architecture decisions](docs/architecture/decisions.md), [failure modes](docs/architecture/guardrails.md), [scenario matrix](docs/architecture/scenario-matrix.md) and [delivery plan](docs/roadmap.md). The next product milestone is a real domain's source-to-model-to-task validation and repair loop, built on this Registry.
 
 ## Non-negotiable
 - Semantic identity, physical identity and runtime facts are distinct.
