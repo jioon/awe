@@ -1,6 +1,6 @@
-# AWE Registry：类型化模型生产与来源一致性
+# AWE Registry：类型化模型生产、来源一致性与数据验证
 
-Registry 是 AWE 数仓产品的 Authoring 边界，使用真实 PostgreSQL 持久化。它不执行任意 SQL、不运行独立 Agent，也不因模型已发布就宣称真实数据任务已经完成。
+Registry 承载 AWE 数仓产品的 Authoring 与首个受控只读 Runtime，使用真实 PostgreSQL 持久化。模型、契约和运行记录共同约束真实数据检查；服务不执行调用方任意 SQL、脚本或数仓写入，也不因模型已发布就宣称任务已经完成。
 
 ## 开发与启动
 
@@ -17,11 +17,11 @@ Registry 是 AWE 数仓产品的 Authoring 边界，使用真实 PostgreSQL 持�
 从仓库根目录构建和启动：
 
 ```sh
-mvn -B -ntp verify
+mvn -B -ntp spotless:check verify
 java -jar awe-registry/target/awe-registry-0.1.0-SNAPSHOT.jar
 ```
 
-工作台由注册服务的 `/` 提供，Token 只留在页面内存中。Java 子模块依赖由根目录 reactor 构建；不要在聚合 POM 上执行 `spring-boot:run`。
+工作台由注册服务的 `/` 提供，Token 只留在页面内存中。Java 子模块依赖由根目录 reactor 构建；不要在聚合 POM 上执行 `spring-boot:run`。代码修改后可运行 `mvn -B -ntp spotless:apply`，再执行格式检查与构建；Java 统一采用 Google Java Format AOSP 四空格样式。
 
 ## 模型文档与发布
 
@@ -54,7 +54,7 @@ java -jar awe-registry/target/awe-registry-0.1.0-SNAPSHOT.jar
 
 未知字段、错误字段类型、缺少记录字段、重复集合和内核不变量失败会被拒绝。破坏性模型变更需要提高主版本；即使允许主版本变更，也必须检查下游影响。Hash 覆盖完整发布身份、类型、版本、规范文档，以及精确依赖与来源快照清单；清单记录依赖的 Release/Hash、来源快照 ID/版本/指纹。旧发布、Hash 和审计历史只读保留；旧草稿必须由作者明确补全 v2 文档，系统不猜测缺失身份、粒度或时间。
 
-Contract 当前支持 `check.model.static` 和 `check.source.consistency` 的受支持建模/发布阶段检查；未知阻断规则或未来执行阶段失败关闭。Function/Action 发布只是声明，不能触发查询、回补或任务重跑。Evidence 绑定真实目标发布 Hash 和已保存来源快照；来源范围可沿精确的 Dataset/subject/owner 实现链继承，不沿任意依赖边扩张。作者提供的 `PASSED` 不是服务器来源检查或业务真值认证。
+Contract 支持 `check.model.static` 和 `check.source.consistency` 的受支持建模/发布阶段检查，以及下述已注册的 EXECUTE 数据检查规则；未支持的阻断规则或阶段失败关闭。EXECUTE 契约发布只检查规则与适用性，不预先宣称数据运行通过。Function/Action 发布只是声明，不能触发查询、回补或任务重跑。Evidence 绑定真实目标发布 Hash 和已保存来源快照；来源范围可沿精确的 Dataset/subject/owner 实现链继承，不沿任意依赖边扩张。作者提供的 `PASSED` 不是服务器来源检查或业务真值认证。
 
 `ObjectType` 的直接来源绑定检查属性存在性、兼容物理类型、可空性及身份键；Dataset 检查声明粒度与时间映射。Metric/Feature 即使没有直接绑定，也重新检查其精确版本 Dataset 的来源，并检查主体、时间、维度、字段及适用的聚合/可获得时点契约。声明元数据满足这些检查不等于真实数据行已满足契约。
 
@@ -98,6 +98,60 @@ Contract 当前支持 `check.model.static` 和 `check.source.consistency` 的受
 
 来源观测和候选物理契约检查通过独立事务追加，因此发布拒绝回滚后仍能查询失败证明。发布 manifest、绑定和当时的验证状态保持不可变；`POST .../verify` 返回的当前观测独立于旧发布中的历史 `VERIFIED`。同一发布的重检查串行执行，确定的漂移/契约不符才创建去重缺口；未配置和不可达不会自动制造数仓改造工单。
 
+## 真实只读数据检查与修复回放
+
+运行固定已发布 Dataset 与 Contract 的精确 ID/Hash；Contract 的 subject 必须是该 Dataset 的精确版本。首先重读元数据并通过来源/物理契约 Gate，然后用运维配置的 PostgreSQL 关系执行注册规则。当前支持：
+
+| EXECUTE 规则 | 检查 |
+|---|---|
+| `check.grain.unique` | Dataset 粒度键的重复 |
+| `check.grain.not_null` | Dataset 粒度键空值 |
+| `check.time.available_after_event` | 绑定的可获得时间不早于事件时间 |
+
+规则由服务端实现，调用方不传 SQL、表名、数据库地址或脚本。首个运行能力要求 Dataset 恰有一个直接来源绑定；多绑定联合执行尚未支持。Function/Action 仍是可发布声明；本轮数据检查接口不执行 Action、回补或任务重跑。
+
+配置通过环境或安全的部署配置提供，源端身份须由运维另行授予只读权限：
+
+| 变量 | 用途 / 范围 |
+|---|---|
+| `AWE_WAREHOUSE_JDBC_URL` | 实际验证 PostgreSQL 的 JDBC URL；缺少配置返回 `NOT_CONFIGURED` |
+| `AWE_WAREHOUSE_JDBC_USER` / `AWE_WAREHOUSE_JDBC_PASSWORD` | 只读数据源身份；与 Registry 持久化身份分开配置 |
+| `AWE_WAREHOUSE_ASSET_BINDINGS` | 来源资产到允许的 `schema.table` 的 JSON 映射，例如 `{"hive:runtime.events":"public.awe_test_events"}` |
+| `AWE_WAREHOUSE_MAX_ROWS` | 默认 10000，上限 100000；不由运行请求放大 |
+
+映射表示本次读取证据的关系。把 `hive` 资产映射到 PostgreSQL 并不表示实现了 Hive 原生数据读取；原生 Hive/Spark/BI 运行适配仍待开发。远程 PostgreSQL 要求 `sslmode=verify-full`，保留 CA 与主机名校验；本地回环测试可用普通 TCP。
+
+读取使用 read-only、repeatable-read 事务，连接/查询有超时，扫描 `LIMIT(maxRows+1)` 判断覆盖范围。空关系和超限均为 `INCONCLUSIVE`，不会把零行或部分行当成全量通过；缺少连接或关系映射为 `NOT_CONFIGURED`，不可达为 `UNAVAILABLE`。所配置关系启用 RLS、粒度列使用非确定性排序规则或检查超出支持的值/内存预算时返回 `INCONCLUSIVE`，不把权限子集或不同等价语义当成完整通过。真实义务失败为 `FAILED`，本次注册 EXECUTE 规则的完整检查通过才为 `PASSED`；其他契约阶段会列入 `limitations`，不冒充已运行。元数据 Gate 失败记录 `BLOCKED`，缺少来源配置仍为 `NOT_CONFIGURED`。
+
+创建运行的请求：
+
+```json
+{
+  "releaseId": "<Dataset release UUID>",
+  "contentHash": "<Dataset release SHA-256>",
+  "contractReleaseId": "<Contract release UUID>",
+  "contractContentHash": "<Contract release SHA-256>",
+  "idempotencyKey": "quality-check-2026-11-12-001"
+}
+```
+
+使用 `POST /api/data-runs` 提交；身份由服务器的 Bearer Token 判定。Run 返回 `id`、`status`、`model_release_id` / `model_content_hash`、`contract_release_id` / `contract_content_hash`、元数据 `source_snapshot_id`、实际 `data_snapshot_ref`、`rows_checked`、`violations` 和 `limitations` 等。同一服务器身份下相同幂等请求复用已有记录，不能借同一个键替换模型或契约。`RUNNING` 表示尚未完成，应查询状态，不能解释为通过；当前同步运行机制不宣称跨进程任务自动恢复。
+
+`data_snapshot_ref` 格式为 `postgresql:binding:<bindingHash>:tx_snapshot_sha256:<snapshotHash>`。前者是 `{jdbcURL,jdbcUser,relation,sourceSystem,externalRef}` 的 SHA-256，后者是实际 PostgreSQL 读取事务快照的 SHA-256；映射修订可观察，连接串与证书路径不暴露，大事务快照也不会被截断。事务结束后该标识不能用来恢复历史行，不是可恢复的数据版本。`PASSED` 只证明本次关系、规则、事务可见数据和扫描范围，不证明其他分区、未来数据、BI 数值等价或业务真值。
+
+真实失败会形成运行缺口。领域团队或外部授权工具修改真实数据后，调用 `POST /api/data-runs/{id}/replays`，例如：
+
+```json
+{
+  "idempotencyKey": "repair-replay-2026-11-12-001",
+  "repairNote": "在现有数仓流程中修复重复事件后，按原契约重新检查"
+}
+```
+
+回放重新读取当前真实数据，并固定原 Dataset、Contract 和规则。`replay_of` 关联原始运行，`repair_note` 记录修复说明；旧 Run 和证据不改写。运行缺口的 `failed_run_id` 指向首次得到真实失败的 Run，`original_run_id` 关联原始请求意图。只有同发布/契约检查真正通过，且 binding Hash 与该失败证据相同，才关闭对应缺口；事务快照 Hash 可随修复后的新数据变化。更换 JDBC 目标、源端配置身份或关系映射后，新关系的检查可以 `PASSED`，但原缺口保持 `OPEN` 并返回范围变化说明。说明文字、幂等重试、放宽契约、数据不可达或不完整扫描均不能代替修复验收。元数据问题列表与运行问题列表分开保留。
+
+Agent 可在自己的仓库或流程平台保存 Skills，组合查发布、创建运行、查看缺口和修复回放等步骤；所有步骤继续受相同服务器 Gate 约束。AWE 不托管或执行 Skill 中的任意代码。完整边界见 [ADR-014](../docs/architecture/adr-014-agent-skills-and-data-verification-loop.md)。
+
 ## HTTP 接口
 
 所有 `/api/` 请求需要服务 Bearer Token；查询允许两种身份，常规写入为 Author，批准/发布为 Reviewer。
@@ -115,7 +169,11 @@ Contract 当前支持 `check.model.static` 和 `check.source.consistency` 的受
 | `GET /api/impact?entityId=...` | 下游依赖影响 |
 | `GET /api/audit?entityId=...` | 模型审核与发布事件 |
 | `GET /api/validation-checks?entityId=...` | 候选物理契约检查与失败证明，包含候选 Hash |
-| `GET /api/gaps` | 持久化问题候选及状态 |
+| `GET /api/gaps` | 元数据/模型来源问题候选及状态 |
+| `POST /api/data-runs`；`GET /api/data-runs` | 创建与查询受控实际数据检查运行 |
+| `GET /api/data-runs/{id}` | 运行版本、检查范围、违规计数与证据 |
+| `POST /api/data-runs/{id}/replays` | 原版本、原契约的修复后重新检查 |
+| `GET /api/data-gaps` | 实际数据义务失败及修复回放状态 |
 | `GET /api/sources/configuration` | 仅返回配置状态，不返回地址或凭据 |
 | `POST /api/sources/{system}/imports` | 正文 `{"externalRef":"..."}`；保存来源观测 |
 | `GET /api/sources/{system}/snapshots?externalRef=...` | 历史来源快照索引 |
@@ -126,17 +184,17 @@ Contract 当前支持 `check.model.static` 和 `check.source.consistency` 的受
 
 ## PostgreSQL 与 HTTP 集成测试
 
-CI 启动真实 PostgreSQL，设置 `AWE_TEST_POSTGRES=true`，运行完整 `mvn -B -ntp verify`，并确认集成测试数量非零且没有跳过。没有此变量时，数据库集成测试跳过，不能据此宣称已验证 Registry。
+CI 启动真实 PostgreSQL，设置 `AWE_TEST_POSTGRES=true`，运行格式检查与完整 `mvn -B -ntp spotless:check verify`，并确认集成测试数量非零且没有跳过。没有此变量时，数据库集成测试跳过，不能据此宣称已验证 Registry。
 
 ```sh
 # 先在独立测试库中配置 AWE_DB_URL/USER/PASSWORD 及两个不同 Token
-AWE_TEST_POSTGRES=true mvn -B -ntp verify
+AWE_TEST_POSTGRES=true mvn -B -ntp spotless:check verify
 ```
 
-使用可丢弃的测试库，避免同应用/生产数据混用。测试覆盖类型、序列化、版本兼容性、错误模型、Flyway、真实 HTTP 鉴权、来源导入、发布重读、物理契约不符的持久化证明和漂移拒绝。本地 HTTP 网关 fixture 是可控协议测试来源，不冒充真实 Hive/BI 生产连接。
+使用可丢弃的测试库，避免同应用/生产数据混用。测试覆盖类型、序列化、版本兼容性、错误模型、Flyway、真实 HTTP 鉴权、来源导入、发布重读、物理契约不符的持久化证明和漂移拒绝；运行集成测试在真实 PostgreSQL 中放入错误行，调用真实接口获得失败，再在 AWE 外修复数据并按相同契约回放。空关系、超限、未配置、幂等与错误版本必须覆盖。HTTP 网关 fixture 和测试关系证明本增量的协议/运行路径，不冒充真实企业 Hive/BI 连接。
 
 ## 生产门槛与下一纵切面
 
 目前两个 Bootstrap 服务 Token 不代表真实个人身份，也没有领域级 RBAC；默认只监听回环。正式接入前仍需 OIDC/SSO、个人审核追溯、源端二次授权、HTTPS、行列/领域策略、资源预算和审计治理。
 
-当前没有真实任务执行器、生产 DDL/SQL 发布集成、行级质量/数值复算或任务修复回放。下一纵切面必须使真实数据任务消费精确 Release/Hash 与来源快照，执行契约并返回范围明确的证据；发现错误后推动真实数仓更改，并以原任务和回归验收关闭。详见 [产品路线](../docs/roadmap.md) 和 [ADR-013](../docs/architecture/adr-013-typed-registry-and-source-gates.md)。
+本轮已把精确版本模型/契约接入真实只读数据验证和外部修复后的同契约回放。生产目标至少覆盖 F3，但 F1 企业来源接入与领域验收、F2 Resolver/Semantic IR/完整语义查询、生产 DDL/SQL/作业发布集成、原生引擎适配、完整质量/数值复算和下游回归仍未完成。不能把这个先行检查链写成所有生产消费任务的闭环已经完成。详见 [产品路线](../docs/roadmap.md)、[ADR-013](../docs/architecture/adr-013-typed-registry-and-source-gates.md) 和 [ADR-014](../docs/architecture/adr-014-agent-skills-and-data-verification-loop.md)。

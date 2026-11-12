@@ -48,6 +48,8 @@ jobs:
           printf '%s  %s\n' "$MAVEN_SHA512" "$archive" | sha512sum --check --strict
           tar -xzf "$archive" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/apache-maven-$MAVEN_VERSION/bin" >> "$GITHUB_PATH"
+      - name: Check Java formatting
+        run: mvn -B -ntp --strict-checksums spotless:check
       - name: Build, unit tests, and real PostgreSQL/HTTP integration
         run: mvn -B -ntp --strict-checksums verify
       - name: Require executed integration tests

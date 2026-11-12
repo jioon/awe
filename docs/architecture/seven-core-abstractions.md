@@ -36,4 +36,6 @@ F0/F1a 建立基础契约与 PostgreSQL Registry；七类抽象随后进入 **Ja
 
 Java CI 的正反契约测试覆盖对象身份、关联扇出、DAU 去重聚合、特征历史可用性、Function/Action 区分、Contract 阶段校验、Evidence 盲区与 sealed 家族闭合；PostgreSQL/HTTP 集成测试覆盖同一类型从建模到发布和来源漂移 Gate 的路径。
 
-**后续关键门槛：真实 Hive/BI 来源与领域模型验收、任务消费精确发布模型、运行验证及修复回放。** 在这些路径可证明前，不能以 Resolver、Agent 演示或 Registry 页面替代数仓生产消费闭环。
+**当前执行纵切面：** 已发布 Dataset 与 Contract 的精确版本约束真实 PostgreSQL 只读检查；运行证据与缺口保留失败，外部修复后按同一契约重新执行。支持的 EXECUTE 规则见 [ADR-014](adr-014-agent-skills-and-data-verification-loop.md)。Function/Action 的发布声明仍不等于任意能力执行或数仓写入许可。
+
+**后续关键门槛：真实 Hive/BI 来源与领域模型验收、生产开发/发布 Gate、完整语义消费、跨下游验证及修复回放。** 在这些路径可证明前，不能以 Resolver、Agent 演示或 Registry 页面替代数仓生产消费闭环。
