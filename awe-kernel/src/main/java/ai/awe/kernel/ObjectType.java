@@ -7,7 +7,7 @@ public record ObjectType(EntityRef ref, Family family, String description,
                          List<Property> properties, List<String> identityKeys)
         implements AweDefinition {
     public enum Family {
-        BUSINESS_ENTITY, BUSINESS_EVENT, DATASET, PIPELINE, DATA_PRODUCT, PROFILE, PHYSICAL_ASSET
+        BUSINESS_ENTITY, BUSINESS_EVENT, DIMENSION, DATASET, PIPELINE, DATA_PRODUCT, PROFILE, PHYSICAL_ASSET
     }
     public enum DataType {
         STRING, BOOLEAN, INTEGER, DECIMAL, DATE, TIMESTAMP, ENTITY_REF, JSON
@@ -27,8 +27,11 @@ public record ObjectType(EntityRef ref, Family family, String description,
         for(var property:properties)
             if(!defined.add(property.name())) throw new IllegalArgumentException("Duplicate property: "+property.name());
         if(identityKeys.isEmpty()) throw new IllegalArgumentException("Object must declare identity");
-        for(String key:identityKeys)
+        for(String key:identityKeys) {
             if(!defined.contains(key)) throw new IllegalArgumentException("Missing identity property: "+key);
+            if(properties.stream().noneMatch(p -> p.name().equals(key) && p.required()))
+                throw new IllegalArgumentException("Identity property must be required: "+key);
+        }
         if(new HashSet<>(identityKeys).size()!=identityKeys.size())
             throw new IllegalArgumentException("Duplicate identity key");
     }

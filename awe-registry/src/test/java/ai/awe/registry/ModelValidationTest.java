@@ -1,45 +1,40 @@
 package ai.awe.registry;
 import org.junit.jupiter.api.Test;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import static org.junit.jupiter.api.Assertions.*;
 final class ModelValidationTest {
   final JsonDocuments json=new JsonDocuments();
   final ModelValidation validation=new ModelValidation();
   @Test void canonicalHashIndependentOfObjectKeyOrder() {
-    assertEquals(json.sha256(json.parse("{\"b\":2,\"a\":1}")),
-                 json.sha256(json.parse("{\"a\":1,\"b\":2}")));
+    assertEquals(json.sha256(json.parse("{\"b\":2,\"a\":1}")),json.sha256(json.parse("{\"a\":1,\"b\":2}")));
   }
-  @Test void validDatasetContract() {
-    var spec=json.parse("""
-       {"name":"活跃明细","definition":"一行一个有效事件","ownerTeam":"video_dw",
-        "grain":{"keys":["event_id"]},
-        "time":{"field":"event_time","role":"EVENT_TIME","zone":"Asia/Shanghai"},
-        "bindings":[{"sourceSystem":"hive","externalRef":"hive.dwd_activity",
-                     "fingerprint":"DDL_SHA256_PENDING"}]}
-       """);
-    assertDoesNotThrow(()->validation.validate("video","dataset.video.activity","Dataset",spec));
+  @Test void validTypedDatasetContract() {
+    assertDoesNotThrow(()->validation.validate("video","dataset.video.events","Dataset",TypedModelFixtures.spec("Dataset")));
   }
-  @Test void invalidMetricGrainAndTimeRejected() {
-    var spec=json.parse("""
-       {"name":"DAU","definition":"日活用户","ownerTeam":"video_dw",
-        "grain":{"keys":["user_id","user_id"]},
-        "time":{"field":"activity_date","role":"BUSINESS_DATE","zone":"Asia/Shanghai"},
-        "subjectRef":"entity.video.user","datasetRef":"dataset.video.activity",
-        "measure":{"field":"user_id","kind":"COUNT_DISTINCT"}}
-       """);
-    assertThrows(IllegalArgumentException.class,()->validation.validate("video","metric.video.dau","Metric",spec));
+  @Test void allTypePrefixesAndOwnReferencesAreChecked() {
+    for(String type:new TypedModels().types()) {
+      var spec=TypedModelFixtures.spec(type);
+      assertDoesNotThrow(()->validation.validate("video",spec.at("/model/ref/id").asText(),type,spec));
+      assertThrows(IllegalArgumentException.class,()->validation.validate("other",spec.at("/model/ref/id").asText(),type,spec));
+      assertThrows(IllegalArgumentException.class,()->validation.validate("video","entity.video.wrong",type,spec));
+    }
   }
-  @Test void missingBindingsFingerprintRejected() {
-    var spec=json.parse("""
-       {"name":"表","definition":"事件表","ownerTeam":"video_dw",
-        "grain":{"keys":["event_id"]},"time":{"field":"dt","role":"BUSINESS_DATE","zone":"Asia/Shanghai"},
-        "bindings":[{"sourceSystem":"hive","externalRef":"hive.dwd"}]}
-       """);
-    assertThrows(IllegalArgumentException.class,()->validation.validate("video","dataset.video.activity","Dataset",spec));
+  @Test void invalidGrainAndTimeRejected() {
+    var grain=TypedModelFixtures.spec("Dataset");((ObjectNode)grain.at("/model/grain")).putArray("keys").add("event_id").add("event_id");
+    assertThrows(IllegalArgumentException.class,()->validation.validate("video","dataset.video.events","Dataset",grain));
+    var time=TypedModelFixtures.spec("Dataset");((ObjectNode)time.at("/model/time")).put("businessZone","Not/AZone");
+    assertThrows(IllegalArgumentException.class,()->validation.validate("video","dataset.video.events","Dataset",time));
   }
-  @Test void prefixEnforced() {
-    var spec=json.parse("""
-      {"name":"x","definition":"x","ownerTeam":"team"}
-    """);
-    assertThrows(IllegalArgumentException.class,()->validation.validate("video","metric.video.dau","BusinessEntity",spec));
+  @Test void dimensionIsAnExplicitObjectFamilyWithItsOwnNamespace() {
+    var spec=TypedModelFixtures.spec("ObjectType");
+    ((ObjectNode)spec.get("model")).put("family","DIMENSION");
+    ((ObjectNode)spec.at("/model/ref")).put("id","dimension.video.app_version");
+    assertDoesNotThrow(()->validation.validate("video","dimension.video.app_version","ObjectType",spec));
+    ((ObjectNode)spec.at("/model/ref")).put("id","entity.video.app_version");
+    assertThrows(IllegalArgumentException.class,()->validation.validate("video","entity.video.app_version","ObjectType",spec));
+  }
+  @Test void contractCannotDisagreeWithEnvelopeOwnership() {
+    var spec=TypedModelFixtures.spec("ContractDefinition");((ObjectNode)spec.get("model")).put("ownerTeam","another_team");
+    assertThrows(IllegalArgumentException.class,()->validation.validate("video","contract.video.events","ContractDefinition",spec));
   }
 }

@@ -5,156 +5,195 @@
 :root{font-family:Inter,"Segoe UI",system-ui,sans-serif;background:#f4f7fb;color:#17263b}
 *{box-sizing:border-box}body{margin:0}header{background:#10253d;color:white;padding:24px max(24px,5vw)}
 header h1{margin:0 0 7px;font-size:25px}header p{margin:0;color:#bed1e7;font-size:13px}
-main{max-width:1380px;margin:20px auto;padding:0 18px}
-.layout{display:grid;grid-template-columns:280px 1fr;gap:16px}
+main{max-width:1450px;margin:20px auto;padding:0 18px}.layout{display:grid;grid-template-columns:280px 1fr;gap:16px}
 .panel{background:white;border:1px solid #dbe3ed;border-radius:12px;padding:18px;min-width:0}
-h2{font-size:16px;margin:0 0 14px}h3{font-size:14px}
-label{display:block;font-size:12px;color:#516178;margin:10px 0 5px}
+h2{font-size:17px;margin:0 0 14px}h3{font-size:14px}p{line-height:1.7}label{display:block;font-size:12px;color:#516178;margin:10px 0 5px}
 input,select,textarea{width:100%;border:1px solid #b9c7d7;border-radius:7px;padding:9px;font:inherit;font-size:13px;background:white;color:#17263b}
-textarea{min-height:300px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;line-height:1.45}
+input:disabled,select:disabled{background:#edf1f6;color:#596c82}textarea{min-height:390px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;line-height:1.5}
 button{padding:9px 12px;border:1px solid #bfd0e0;border-radius:7px;background:#f8fbff;color:#1b385b;cursor:pointer;font-weight:600}
-button:hover{background:#e8f1fb}.primary{background:#1257b2;color:white;border-color:#1257b2}
-.primary:hover{background:#0b468f}.danger{color:#a42a32}.section{margin-top:16px}
-.item{border:1px solid #e1e8f0;border-radius:8px;padding:11px;margin:7px 0;cursor:pointer}
-.item:hover{border-color:#5395dd;background:#f8fbff}.item small{display:block;color:#637590;margin-top:5px}
-.row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
-.tabs{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 17px}
-.tab.active{background:#102b4e;color:#fff}.badge{display:inline-block;border-radius:12px;padding:2px 8px;font-size:11px;background:#ebf1f7;color:#2d506f}
-pre{overflow-wrap:anywhere;white-space:pre-wrap;font-size:12px;background:#f5f8fb;padding:14px;border-radius:8px;max-height:400px;overflow:auto}
-#message{font-size:13px;color:#4e5e71;min-height:18px}#message.error{color:#af2538}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.hidden{display:none}.muted{color:#73829a;font-size:12px}
+button:hover{background:#e8f1fb}button:disabled{opacity:.5;cursor:not-allowed}.primary{background:#1257b2;color:white;border-color:#1257b2}.primary:hover{background:#0b468f}
+.section{margin-top:20px}.item{display:block;width:100%;text-align:left;border:1px solid #e1e8f0;border-radius:8px;padding:11px;margin:7px 0;cursor:pointer;font-weight:400}
+.item:hover{border-color:#5395dd;background:#f8fbff}.item small{display:block;color:#637590;margin-top:5px;overflow-wrap:anywhere}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.actions,.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.tabs{margin:0 0 17px}.tab.active{background:#102b4e;color:white}.badge{display:inline-block;border-radius:12px;padding:3px 9px;font-size:11px;background:#ebf1f7;color:#2d506f}
+.badge.good{background:#e5f3eb;color:#17613a}.badge.warn{background:#fff1d6;color:#795005}.badge.bad{background:#fee9ed;color:#9a263b}
+pre{overflow-wrap:anywhere;white-space:pre-wrap;font-size:12px;background:#f5f8fb;padding:14px;border-radius:8px;max-height:480px;overflow:auto}
+#message{font-size:13px;color:#4e5e71;min-height:18px;margin-bottom:12px}#message.error{color:#af2538}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.hidden{display:none!important}.muted{color:#637590;font-size:12px}.callout{background:#f3f7fd;border-left:3px solid #4e8aca;padding:10px 14px;font-size:13px}.callout.warn{border-color:#bc861b;background:#fff8e9}
+.details-table{border-collapse:collapse;width:100%;font-size:12px}.details-table th,.details-table td{text-align:left;border-bottom:1px solid #e1e8f0;padding:9px;vertical-align:top;overflow-wrap:anywhere}
+.empty{color:#73829a;font-size:12px;padding:8px 0}code{font-size:12px;overflow-wrap:anywhere}summary{cursor:pointer;font-size:13px;font-weight:600;margin:12px 0}
 @media(max-width:880px){.layout,.grid{grid-template-columns:1fr}}
 </style></head><body>
-<header><h1>AWE · 领域模型工作台</h1><p>真实 PostgreSQL 模型注册 · 审核与不可变发布 · 来源绑定与依赖影响 · 不连接数据库时不会显示伪造模型</p></header>
+<header><h1>AWE · 数仓模型工作台</h1><p>强类型建模 → 来源一致性检查 → 独立审核 → 不可变发布 → 漂移与改进记录</p></header>
 <main><div class="layout">
 <aside class="panel">
-<h2>接入身份</h2>
-<label>当前授权凭据（只保存在页面内存中，刷新后清除）</label>
-<input id="token" type="password" autocomplete="off" placeholder="粘贴 Author 或 Reviewer Token">
+<h2>接入身份</h2><label for="token">授权凭据（仅在当前页面内存中使用）</label>
+<input id="token" type="password" autocomplete="off" placeholder="Author 或 Reviewer Token">
 <div class="actions"><button id="refresh">加载真实资产</button></div>
-<div class="section"><h2>领域</h2><div id="domains"></div><button onclick="showDomainForm()">+ 新建领域</button></div>
-<div class="section"><h2>已发布模型</h2><div id="releases"></div></div>
-<div class="section"><h2>工作流草稿</h2><div id="drafts"></div></div>
+<div class="section"><h2>领域</h2><div id="domains" class="empty">尚未加载</div><button id="newDomain">+ 新建领域</button></div>
+<div class="section"><h2>已发布模型</h2><div id="releases" class="empty">尚未加载</div></div>
+<div class="section"><h2>工作流草稿</h2><div id="drafts" class="empty">尚未加载</div></div>
 </aside>
 <section class="panel">
-<div class="row"><h2 id="title">模型资产与发布</h2><span id="status" class="badge">未连接</span></div>
-<div class="tabs">
-<button class="tab active" data-view="overview">概览</button>
-<button class="tab" data-view="create">新建草稿</button>
-<button class="tab" data-view="inspect">资产详情</button>
-<button class="tab" data-view="impact">影响分析</button>
-</div>
-<div id="message"></div>
+<div class="row"><h2 id="title">建模、发布与验证</h2><span id="status" class="badge">未连接</span></div>
+<nav class="tabs" aria-label="工作台页面">
+<button class="tab active" data-view="overview">概览</button><button class="tab" data-view="create">新建草稿</button>
+<button class="tab" data-view="sources">来源资产</button><button class="tab" data-view="inspect">模型详情</button>
+<button class="tab" data-view="impact">影响分析</button><button class="tab" data-view="gaps">改进记录</button>
+</nav>
+<div id="message" role="status" aria-live="polite"></div>
 <div id="overview">
-<p>这里是 AWE F1 的实际建模入口。先创建领域，再创建实体草稿；经过类型校验、提交审核和独立 Reviewer 凭据批准后，才可以发布不可变版本。</p>
-<p>发布时检查依赖实体是否已经发布，并记录来源系统的资产引用和指纹。<strong>来源绑定初期为未校验状态，不能冒充已经完成与生产 BI/Hive 的实时对账。</strong></p>
-<div class="grid"><div><h3>发布状态</h3><pre id="counts">需要连接数据库</pre></div>
-<div><h3>关键安全边界</h3><p class="muted">默认只绑定本地回环地址；API 需两个不同的 Bootstrap Token；未配置时拒绝全部 API 请求。上线前需要企业 OIDC、领域级 RBAC 和 HTTPS。</p></div></div>
+<p>在同一工作台维护对象、关系、Dataset / Metric / Feature、Function、Action、Contract 和 Evidence。所有提交、审核与发布均使用服务端的类型模型和校验路径。</p>
+<p>有物理来源的模型需先导入真实资产，再显式确认模型语义、固定依赖版本并完成来源检查。<strong>未配置的 Hive / BI 来源返回 NOT_CONFIGURED，不会产生成功导入或已验证资产。</strong></p>
+<div class="grid"><div><h3>已加载资产</h3><pre id="counts">需要连接数据库</pre></div>
+<div><h3>当前边界</h3><p class="muted">元数据一致性不等于数据质量或业务真值。Function / Action 的发布是能力定义，并不执行查询、回补或生产写操作。证据必须注明发布版本、来源快照与验证盲区。</p></div></div>
+<p class="callout warn">Bootstrap Token 仅适用于隔离开发环境。服务默认监听本地回环地址；生产接入仍需企业身份、领域权限与 HTTPS。</p>
 </div>
 <div id="create" class="hidden">
-<div class="grid"><div><label>领域代码</label><input id="domain" value="video"></div>
-<div><label>实体类型</label><select id="type">
-<option>BusinessEntity</option><option>BusinessEvent</option><option selected>Dataset</option>
-<option>Metric</option><option>Dimension</option><option>Feature</option><option>Pipeline</option><option>DataProduct</option>
-</select></div></div>
-<label>规范实体 ID，例如 dataset.video.activity_events</label><input id="entity" value="dataset.video.activity_events">
-<label>模型契约 JSON（草稿可不完整，提交审核时严格校验）</label>
-<textarea id="spec"></textarea>
-<div class="actions"><button onclick="fillTemplate()">填入示例结构</button><button class="primary" onclick="createDraft()">保存真实草稿</button></div>
+<div class="row"><h3 id="editorHeading">新建类型化草稿</h3><button id="cancelEdit" class="hidden">结束编辑 / 新建草稿</button></div>
+<div class="grid"><div><label for="domain">领域代码</label><input id="domain" value="video"></div>
+<div><label for="type">模型类型</label><select id="type"><option>ObjectType</option><option>LinkType</option><option selected>Dataset</option><option>Metric</option><option>Feature</option><option>FunctionDefinition</option><option>ActionDefinition</option><option>ContractDefinition</option><option>EvidenceAssertion</option></select></div></div>
+<div class="grid"><div><label for="entity">规范模型 ID</label><input id="entity" value="dataset.video.example"></div><div><label for="modelVersion">候选发布版本（与 model.ref.modelVersion 一致）</label><input id="modelVersion" value="1.0.0"></div></div>
+<div id="objectFamilyRow" class="hidden"><label for="objectFamily">对象家族（填入模板时生效）</label><select id="objectFamily"><option>BUSINESS_ENTITY</option><option>BUSINESS_EVENT</option><option>DIMENSION</option><option>DATASET</option><option>PIPELINE</option><option>DATA_PRODUCT</option><option>PROFILE</option><option>PHYSICAL_ASSET</option></select></div>
+<p id="typeHelp" class="callout"></p>
+<label for="spec">模型定义（Schema v2；所有依赖引用均需固定已发布版本）</label><textarea id="spec" spellcheck="false"></textarea>
+<p class="muted">模板只是待编写的结构，不是已验证业务模型。请确认身份、粒度、时间和执行规则；Dataset 来源绑定通过“来源资产”导入后显式附加，不填写伪造指纹。</p>
+<div class="actions"><button id="template">重置为类型模板</button><button id="saveDraft" class="primary">保存草稿</button><button id="saveValidate">保存并检查</button></div>
 </div>
-<div id="inspect" class="hidden"><div id="details">选择一个真实草稿或已发布版本。</div></div>
-<div id="impact" class="hidden"><label>被依赖的实体 ID</label><input id="impactEntity" value="dataset.video.activity_events">
-<button onclick="showImpact()">查看直接下游</button><pre id="impactOutput">等待查询</pre></div>
+<div id="sources" class="hidden">
+<h3>真实 Hive / BI 元数据</h3><p class="muted">连接由服务端配置；浏览器不能指定任意网络地址。导入记录权威来源的版本、快照和内容指纹，不直接创建或认证业务语义。</p>
+<button id="sourceConfiguration">检查连接配置</button><pre id="sourceConfigOutput">尚未查询配置</pre>
+<div class="grid"><div><label for="sourceSystem">来源系统</label><select id="sourceSystem"><option value="hive">Hive</option><option value="bi">BI</option></select></div><div><label for="sourceRef">来源资产引用</label><input id="sourceRef" placeholder="由元数据服务识别的资产引用"></div></div>
+<div class="actions"><button id="importSource" class="primary">导入当前来源快照</button><button id="attachSource" disabled>将真实绑定附加到 Dataset 编辑器</button></div>
+<div id="sourceTimeMappings"></div><div id="sourceStatus" aria-live="polite"></div><pre id="sourceOutput">尚未导入资产</pre>
+<p class="callout">附加绑定只填写来源引用和指纹，不推断业务身份、模型粒度或时间含义。仍需由领域作者完成建模，并在发布时重新检查来源。</p>
+</div>
+<div id="inspect" class="hidden"><div id="details">选择一个草稿或已发布版本。</div><div id="validationPanel" class="hidden"><h3>检查结果</h3><div id="validationSummary"></div><pre id="validationOutput"></pre></div></div>
+<div id="impact" class="hidden"><label for="impactEntity">被依赖的模型 ID</label><input id="impactEntity" value="dataset.video.activity_events"><div class="actions"><button id="showImpact">查看下游依赖</button></div><pre id="impactOutput">等待查询</pre></div>
+<div id="gaps" class="hidden"><div class="row"><h3>漂移与改进记录</h3><button id="loadGaps">刷新真实记录</button></div><p class="muted">这些记录关联失败的检查、模型版本和受影响资产。发现漂移不会自动修改模型或声称已经修复；修复须经重新建模、验证与发布。</p><div id="gapList" class="empty">尚未加载</div></div>
 </section></div></main>
 <script>
-let token='',current=null,currentKind='',editingDraftId=null;
+'use strict';
 const $=id=>document.getElementById(id);
-const view=v=>{
-  for(const name of ['overview','create','inspect','impact']) $(name).classList.toggle('hidden',name!==v);
-  document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
-};
-document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>view(b.dataset.view));
-const escapeHtml=s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
-function notice(s,error=false){$('message').textContent=s;$('message').className=error?'error':''}
+const VIEWS=['overview','create','sources','inspect','impact','gaps'];
+let current=null,currentKind='',editingDraftId=null,editingRevision=null,loadedReleases=[],sourceObservation=null;
+const typeHelp={ObjectType:'定义业务或工程对象类别及其身份属性；不是数据库中的单行对象。',LinkType:'关系须声明两端的已发布类型、基数、时间策略和映射。关系存在不代表可以安全 JOIN。',Dataset:'Dataset 声明粒度、时间和主体；发布前需要真实来源绑定及一致性检查。',Metric:'Metric 固定来源 Dataset、主体和允许的维度；聚合契约约束跨粒度汇总。',Feature:'Feature 必须区分事件时间和可获得时间，保留历史时点正确性的约束。',FunctionDefinition:'Function 是无副作用的能力定义。此处发布不会执行查询，也不会授予源系统权限。',ActionDefinition:'Action 是有副作用的能力定义，需声明授权、审批、幂等、补偿和后验义务；此处不会执行生产操作。',ContractDefinition:'Contract 声明可验证的义务、执行阶段与阻断级别。未实现的检查器不能被视为已执行。',EvidenceAssertion:'Evidence 只说明特定模型发布和来源快照上的检查结果；需填写真实内容 Hash、检查时间与可追溯证据。'};
+function view(v){for(const name of VIEWS)$(name).classList.toggle('hidden',name!==v);document.querySelectorAll('.tab').forEach(b=>{b.classList.toggle('active',b.dataset.view===v);b.setAttribute('aria-current',b.dataset.view===v?'page':'false')});}
+function notice(message,error=false){$('message').textContent=message;$('message').className=error?'error':'';}
+async function safe(fn){try{notice('');return await fn()}catch(error){notice(error.message,true);return null}}
 async function api(path,method='GET',body=null){
-  token=$('token').value.trim();
-  if(!token)throw Error('请先填写 Author 或 Reviewer Token');
-  const opts={method,headers:{'Authorization':'Bearer '+token}};
-  if(body!==null){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body)}
-  const r=await fetch('/api'+path,opts);
-  const text=await r.text();let data;try{data=JSON.parse(text)}catch(e){data={message:text}};
-  if(!r.ok)throw Error((data.message||data.error||r.statusText)+' (HTTP '+r.status+')');
-  return data;
+ const token=$('token').value.trim();if(!token)throw Error('请先填写 Author 或 Reviewer Token');
+ const options={method,headers:{Authorization:'Bearer '+token},cache:'no-store'};
+ if(body!==null){options.headers['Content-Type']='application/json';options.body=JSON.stringify(body)}
+ const response=await fetch('/api'+path,options),text=await response.text();let data;
+ try{data=JSON.parse(text)}catch{data={message:'服务返回了无法读取的响应'}}
+ if(!response.ok)throw Error((data.message||data.error||response.statusText)+' (HTTP '+response.status+')');return data;
 }
-async function safe(fn){try{notice('');await fn()}catch(e){notice(e.message,true)}}
-function card(label,sub,action){
-  const el=document.createElement('div');el.className='item';
-  const a=document.createElement('strong');a.textContent=label;el.appendChild(a);
-  const b=document.createElement('small');b.textContent=sub;el.appendChild(b);
-  el.onclick=action;return el;
+function element(tag,text,className){const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node}
+function jsonBlock(value){return element('pre',JSON.stringify(value,null,2))}
+function card(label,sub,action){const node=element('button',undefined,'item');node.append(element('strong',label),element('small',sub));node.onclick=action;return node}
+function list(id,rows,render,empty){const box=$(id);box.replaceChildren();if(!rows.length)box.append(element('p',empty,'empty'));else rows.forEach(x=>box.append(render(x)))}
+function statusBadge(status){const badge=element('span',status||'UNKNOWN','badge');if(['VERIFIED','PASSED','OBSERVED','IMPORTED'].includes(status))badge.classList.add('good');else if(['DRIFTED','FAILED','INVALID_RESPONSE'].includes(status))badge.classList.add('bad');else badge.classList.add('warn');return badge}
+async function refreshData(){
+ const [domains,releases,drafts]=await Promise.all([api('/domains'),api('/releases'),api('/drafts')]);loadedReleases=releases;
+ list('domains',domains,x=>card(x.code,x.owner_team||x.ownerTeam,()=>beginNew(x.code)),'没有领域');
+ list('releases',releases,x=>card(x.entity_id,'v'+x.version+' · '+x.entity_type,()=>safe(()=>loadDetailData(x.id,'release'))),'没有已发布模型');
+ list('drafts',drafts,x=>card(x.entity_id,x.state+' · r'+x.revision,()=>safe(()=>loadDetailData(x.id,'draft'))),'没有草稿');
+ $('status').textContent='数据库已连接';$('status').className='badge good';$('counts').textContent=JSON.stringify({domains:domains.length,publishedModels:releases.length,drafts:drafts.length},null,2);
 }
-async function refresh(){
- await safe(async()=>{
-   const [domains,releases,drafts]=await Promise.all([api('/domains'),api('/releases'),api('/drafts')]);
-   $('domains').replaceChildren();domains.forEach(x=>$('domains').appendChild(card(x.code,x.owner_team,()=>{$('domain').value=x.code;view('create')})));
-   $('releases').replaceChildren();releases.forEach(x=>$('releases').appendChild(card(x.entity_id,'v'+x.version+' · '+x.entity_type,()=>loadDetail(x.id,'release'))));
-   $('drafts').replaceChildren();drafts.forEach(x=>$('drafts').appendChild(card(x.entity_id,x.state+' · r'+x.revision,()=>loadDetail(x.id,'draft'))));
-   $('status').textContent='连接成功';
-   $('counts').textContent=JSON.stringify({domains:domains.length,publishedModels:releases.length,drafts:drafts.length},null,2);
- });
-}
-$('refresh').onclick=refresh;
-function showDomainForm(){
- const code=prompt('领域代码（小写英文字母、数字和下划线）');
- if(!code)return;const name=prompt('领域显示名称')||code;const owner=prompt('负责团队')||'unknown';
- safe(async()=>{await api('/domains','POST',{code,displayName:name,ownerTeam:owner});await refresh()});
-}
-function fillTemplate(){
- const domain=$('domain').value.trim()||'video',type=$('type').value;
- const idPrefix={BusinessEntity:'entity',BusinessEvent:'event',Dataset:'dataset',Metric:'metric',Dimension:'dimension',Feature:'feature',Pipeline:'pipeline',DataProduct:'product'}[type];
- $('entity').value=idPrefix+'.'+domain+'.example';
- const spec={name:'示例名称',definition:'请由领域数仓负责人确认业务含义',ownerTeam:domain+'_dw_team'};
- if(['Dataset','Metric','Feature'].includes(type)){
-  spec.grain={keys:['user_id','business_date']};
-  spec.time={field:'business_date',role:'BUSINESS_DATE',zone:'Asia/Shanghai'};
+function editMode(id,revision=null){editingDraftId=id;editingRevision=id?revision:null;$('editorHeading').textContent=id?'编辑草稿 '+id:'新建类型化草稿';$('cancelEdit').classList.toggle('hidden',!id);for(const field of ['domain','type','entity','objectFamily'])$(field).disabled=!!id;}
+function updateTypeHelp(){$('typeHelp').textContent=typeHelp[$('type').value]||'历史类型需显式迁移为强类型模型。';$('objectFamilyRow').classList.toggle('hidden',$('type').value!=='ObjectType')}
+function beginNew(domain){editMode(null);if(domain)$('domain').value=domain;fillTemplate();view('create');}
+function publishedRef(types,domain,fallback){const match=loadedReleases.find(r=>types.includes(r.entity_type)&&r.domain===domain);return match?{id:match.entity_id,modelVersion:match.version}:{id:fallback,modelVersion:'1.0.0'}}
+function modelTemplate(){
+ const domain=$('domain').value.trim()||'video',type=$('type').value,version=$('modelVersion').value.trim()||'1.0.0';
+ const family=$('objectFamily').value,prefix=type==='ObjectType'?{BUSINESS_ENTITY:'entity',BUSINESS_EVENT:'event',DIMENSION:'dimension',DATASET:'dataset',PIPELINE:'pipeline',DATA_PRODUCT:'product',PROFILE:'profile',PHYSICAL_ASSET:'asset'}[family]:{LinkType:'link',Dataset:'dataset',Metric:'metric',Feature:'feature',FunctionDefinition:'function',ActionDefinition:'action',ContractDefinition:'contract',EvidenceAssertion:'assertion'}[type];
+ const id=prefix+'.'+domain+'.example',ref={id,modelVersion:version};
+ const subject=publishedRef(['ObjectType'],domain,'entity.'+domain+'.user'),dataset=publishedRef(['Dataset'],domain,'dataset.'+domain+'.events');
+ const grain={keys:['event_id'],kind:'EVENT'},time={roles:['EVENT_TIME'],businessZone:'Asia/Shanghai',backfillPossible:true};
+ let model;
+ switch(type){
+ case 'ObjectType':model={ref,family,description:'请填写已确认的业务对象定义',properties:[{name:'id',type:'STRING',required:true,sensitive:false}],identityKeys:['id']};break;
+ case 'LinkType':model={ref,fromType:dataset,toType:subject,meaning:'HAS_DIMENSION',cardinality:'MANY_TO_ONE',temporalPolicy:'AS_OF',identityMappingRef:'identity.'+domain+'.review_required',certified:false};break;
+ case 'Dataset':model={ref,grain,time,subjectType:subject,dimensions:[]};break;
+ case 'Metric':model={ref,grain:{keys:['business_date'],kind:'AGGREGATE'},time:{...time,roles:['BUSINESS_DATE']},subjectType:subject,sourceDataset:dataset,aggregation:{kind:'COUNT_DISTINCT',permittedRollupAxes:[],forbiddenRollupAxes:['day']},allowedDimensions:[]};break;
+ case 'Feature':model={ref,grain:{keys:['user_id','observation_time'],kind:'FEATURE'},time:{...time,roles:['EVENT_TIME','AVAILABLE_AT']},subjectType:subject,sourceDataset:dataset,observationTimeField:'observation_time',availableAtField:'available_at'};break;
+ case 'FunctionDefinition':model={ref,ownerType:dataset,operation:'dataset.inspect',parameters:[{name:'business_date',type:'DATE',required:true}],resultSchemaRef:'schema.'+domain+'.result',executorBindingRef:'adapter.'+domain+'.read_only',requiredAssertions:[]};break;
+ case 'ActionDefinition':model={ref,ownerType:subject,operation:'pipeline.rerun',sideEffect:'PIPELINE_RERUN',executorBindingRef:'adapter.'+domain+'.scheduler',authorizationPolicyRef:'policy.'+domain+'.pipeline_write',idempotencyKeySpec:'pipeline_id+partition+request_id',requiresApproval:true,rollbackOrCompensationRef:'compensation.'+domain+'.restore_partition',postconditionAssertions:['assertion.'+domain+'.partition_ready@1.0.0']};break;
+ case 'ContractDefinition':model={ref,subject:dataset,kind:'DATA',ownerTeam:domain+'_dw',obligations:[{ruleId:'check.source.consistency',at:'PUBLISH',blocking:true}]};break;
+ case 'EvidenceAssertion':model={ref,subject:dataset,kind:'SOURCE_RECONCILIATION',result:'NOT_RUN',checkerRef:'checker.'+domain+'.source',modelReleaseHash:loadedReleases.find(r=>r.entity_id===dataset.id&&r.version===dataset.modelVersion)?.content_hash||'填写实际模型发布的64位SHA256',sourceSnapshotRef:'填写实际来源快照ID',checkedAt:new Date().toISOString(),evidenceRefs:[],limitations:['尚未执行检查；请绑定实际发布和来源快照后提交']};break;
+ default:throw Error('请选择受支持的强类型模型');
  }
- if(type==='Dataset')spec.bindings=[{sourceSystem:'hive',externalRef:'hive.dwd_example',fingerprint:'MANUAL_UNVERIFIED'}];
- if(type==='Metric'){spec.subjectRef='entity.'+domain+'.user';spec.datasetRef='dataset.'+domain+'.activity_events';spec.measure={kind:'COUNT_DISTINCT',field:'user_id'};}
- if(type==='Pipeline'){spec.inputs=[];spec.outputs=[];}
- $('spec').value=JSON.stringify(spec,null,2);
+ return {id,spec:{schemaVersion:2,name:'待确认模型名称',definition:'请由领域数仓负责人确认业务含义',ownerTeam:domain+'_dw',model,...(type==='Dataset'?{bindings:[]}:{}),dependsOn:[]}};
 }
-fillTemplate();
-async function createDraft(){
- await safe(async()=>{
-   const spec=JSON.parse($('spec').value);
-   const row=editingDraftId ? await api('/drafts/'+editingDraftId,'PUT',{spec}) : await api('/drafts','POST',{domain:$('domain').value.trim(),entityId:$('entity').value.trim(),entityType:$('type').value,spec}); editingDraftId=null;
-   notice('草稿已保存：'+row.id);await refresh();await loadDetail(row.id,'draft');
- });
+function fillTemplate(){if(editingDraftId)throw Error('编辑现有草稿时不能重置身份；请先结束编辑。');const template=modelTemplate();$('entity').value=template.id;$('spec').value=JSON.stringify(template.spec,null,2);updateTypeHelp();}
+function syncRef(){const spec=JSON.parse($('spec').value);if(spec.model&&spec.model.ref){spec.model.ref.id=$('entity').value.trim();spec.model.ref.modelVersion=$('modelVersion').value.trim();$('spec').value=JSON.stringify(spec,null,2)}}
+async function saveDraft(){
+ const spec=JSON.parse($('spec').value),entity=$('entity').value.trim(),version=$('modelVersion').value.trim();
+ if(spec.model?.ref?.id!==entity||spec.model?.ref?.modelVersion!==version)throw Error('模型 ID / 候选版本与 JSON 中的 model.ref 不一致，请先修正。');
+ const row=editingDraftId?await api('/drafts/'+editingDraftId,'PUT',{spec,expectedRevision:editingRevision}):await api('/drafts','POST',{domain:$('domain').value.trim(),entityId:entity,entityType:$('type').value,spec});
+ editMode(null);await refreshData();await loadDetailData(row.id,'draft');notice('草稿已保存，尚未提交审核。');return row;
 }
-async function loadDetail(id,kind){
- await safe(async()=>{
-  const r=await api(kind==='draft'?'/drafts/'+id:'/releases/'+id);
-  current=r;currentKind=kind;view('inspect');
-  const box=$('details');box.replaceChildren();
-  const heading=document.createElement('h3');heading.textContent=r.entity_id+' · '+(r.state||('v'+r.version));box.appendChild(heading);
-  const metadata=document.createElement('p');metadata.className='muted';metadata.textContent=r.entity_type+' · '+r.domain+' · '+(r.content_hash||'未发布');box.appendChild(metadata);
-  const pre=document.createElement('pre');pre.textContent=JSON.stringify(r.spec,null,2);box.appendChild(pre);
-  if(kind==='release'){
-   const rpre=document.createElement('pre');rpre.textContent='依赖关系：\n'+JSON.stringify(r.relations,null,2)+'\n来源绑定：\n'+JSON.stringify(r.bindings,null,2);box.appendChild(rpre);
-  }else{
-   const actions=document.createElement('div');actions.className='actions';box.appendChild(actions);
-   const add=(text,cb)=>{const b=document.createElement('button');b.textContent=text;b.onclick=cb;actions.appendChild(b)};
-   if(r.state==='DRAFT'){
-     add('提交审核',()=>mutate('/drafts/'+id+'/submit'));
-     add('打开草稿编辑',()=>{$('domain').value=r.domain;$('type').value=r.entity_type;$('entity').value=r.entity_id;$('spec').value=JSON.stringify(r.spec,null,2);editingDraftId=id;view('create');notice('正在编辑草稿 '+id+'，保存将更新原草稿。')});
-   }
-   if(r.state==='IN_REVIEW')add('审核通过（Reviewer）',()=>mutate('/drafts/'+id+'/approve'));
-   if(r.state==='APPROVED')add('发布版本（Reviewer）',()=>{const version=prompt('不可变语义版本，例如 1.0.0');if(version)mutate('/drafts/'+id+'/publish',{version})});
+function appendActions(box){const row=element('div',undefined,'actions');box.append(row);return(label,action)=>{const button=element('button',label);button.onclick=()=>safe(action);row.append(button)}}
+function renderDefinition(box,row){
+ const spec=row.spec||{},heading=element('h3',row.entity_id+' · '+(row.state||'v'+row.version));box.append(heading);
+ box.append(element('p',[row.entity_type,row.domain,'Schema '+(spec.schemaVersion||'1（历史）'),row.content_hash||'尚未发布'].join(' · '),'muted'));
+ if(spec.schemaVersion!==2)box.append(element('p','历史模型保留原始内容，仅供追溯。重新提交或升级需要显式补充 Schema v2 强类型字段；不会自动推断身份、时间或模型语义。','callout warn'));
+ const model=spec.model;
+ if(model){const summary=element('table',undefined,'details-table');for(const [label,value] of [['类型',row.entity_type],['规范引用',model.ref],['对象家族 / 语义类别',model.family||model.kind||row.entity_type],['粒度',model.grain],['时间',model.time],['主体 / 所属',model.subjectType||model.ownerType||model.subject],['固定来源 Dataset',model.sourceDataset]]){if(value===undefined)continue;const tr=element('tr');tr.append(element('th',label),element('td',typeof value==='string'?value:JSON.stringify(value)));summary.append(tr)}box.append(summary)}
+ const document=element('details');document.open=true;document.append(element('summary','完整模型定义'),jsonBlock(spec));box.append(document);
+ if(row.relations||row.bindings){const dependencies=element('details');dependencies.open=true;dependencies.append(element('summary','固定依赖与来源绑定'),jsonBlock({relations:row.relations||[],bindings:row.bindings||[]}));box.append(dependencies)}
+}
+async function loadDetailData(id,kind){
+ const row=await api(kind==='draft'?'/drafts/'+id:'/releases/'+id);current=row;currentKind=kind;view('inspect');$('validationPanel').classList.add('hidden');const box=$('details');box.replaceChildren();renderDefinition(box,row);const add=appendActions(box);
+ if(kind==='release'){
+  add('重新检查真实来源 / 检测漂移',async()=>{const result=await api('/releases/'+id+'/verify','POST',{});showValidation(result,'来源复查');notice('来源复查已记录。检查范围与限制见下方结果。')});
+  add('查看影响',async()=>{$('impactEntity').value=row.entity_id;await showImpactData();view('impact')});
+  add('新建后续版本草稿',()=>{if(row.spec?.schemaVersion!==2)throw Error('历史模型需先显式迁移；请新建对应强类型草稿。');editMode(null);$('domain').value=row.domain;$('type').value=row.entity_type;$('entity').value=row.entity_id;$('modelVersion').value=row.version;$('spec').value=JSON.stringify(row.spec,null,2);updateTypeHelp();view('create');notice('正在创建后续版本，请修改候选版本和 model.ref.modelVersion；原版本保持不可变。')});
+ }else{
+  add('检查类型、兼容性与来源',async()=>showValidation(await api('/drafts/'+id+'/validate','POST',{}),'发布前检查'));
+  if(row.state==='DRAFT'){
+   add('打开草稿编辑',()=>{if(row.spec?.schemaVersion!==2)throw Error('历史草稿需显式补充 Schema v2，请从类型模板新建迁移草稿。');$('domain').value=row.domain;$('type').value=row.entity_type;$('entity').value=row.entity_id;$('modelVersion').value=row.spec.model.ref.modelVersion;$('spec').value=JSON.stringify(row.spec,null,2);if(row.spec.model.family)$('objectFamily').value=row.spec.model.family;editMode(id,row.revision);updateTypeHelp();view('create');notice('保存会更新当前草稿，不创建另一个草稿。')});
+   add('提交审核',()=>mutate('/drafts/'+id+'/submit',{}));
   }
- });
+  if(row.state==='IN_REVIEW')add('审核通过（Reviewer）',()=>mutate('/drafts/'+id+'/approve',{}));
+  if(row.state==='APPROVED')add('发布固定版本（Reviewer）',async()=>{const version=row.spec?.model?.ref?.modelVersion;if(!version)throw Error('缺少固定的候选发布版本。');if(confirm('发布 '+row.entity_id+' @ '+version+'？发布会重新验证类型、兼容性和真实来源。'))await mutate('/drafts/'+id+'/publish',{version})});
+ }
+ const checks=element('details');checks.append(element('summary','持久化来源与验证检查记录'));box.append(checks);checks.addEventListener('toggle',()=>{if(checks.open&&!checks.dataset.loaded)safe(async()=>{const rows=await api('/validation-checks?entityId='+encodeURIComponent(row.entity_id));checks.append(jsonBlock(rows));checks.dataset.loaded='true'})});
+ const audit=element('details');audit.append(element('summary','审计记录'));box.append(audit);audit.addEventListener('toggle',()=>{if(audit.open&&!audit.dataset.loaded)safe(async()=>{const rows=await api('/audit?entityId='+encodeURIComponent(row.entity_id));audit.append(jsonBlock(rows));audit.dataset.loaded='true'})});
 }
-async function mutate(path,body){await safe(async()=>{await api(path,'POST',body||{});notice('操作成功');await refresh();if(current)await loadDetail(current.id,'draft')})}
-async function showImpact(){await safe(async()=>{$('impactOutput').textContent=JSON.stringify(await api('/impact?entityId='+encodeURIComponent($('impactEntity').value)),null,2)})}
+function showValidation(result,label){$('validationPanel').classList.remove('hidden');const box=$('validationSummary');box.replaceChildren();box.append(element('p',label));if(typeof result.valid==='boolean')box.append(statusBadge(result.valid?'PASSED':'FAILED'));if(result.status)box.append(statusBadge(result.status));if(result.compatibility)box.append(element('p','版本兼容性：'+(result.compatibility.compatible?'兼容':result.compatibility.breaking?'存在破坏性变化':'见详细结果')));$('validationOutput').textContent=JSON.stringify(result,null,2);}
+async function mutate(path,body){const id=current.id;const result=await api(path,'POST',body);await refreshData();const published=path.endsWith('/publish');await loadDetailData(published?result.id:id,published?'release':'draft');notice(published?'不可变版本已发布；认证范围以检查记录为准。':'工作流状态已更新。')}
+async function sourceConfiguration(){const result=await api('/sources/configuration');$('sourceConfigOutput').textContent=JSON.stringify(result,null,2)}
+function clearSourceObservation(){sourceObservation=null;$('attachSource').disabled=true;$('sourceStatus').replaceChildren();$('sourceTimeMappings').replaceChildren();$('sourceOutput').textContent='尚未导入当前资产';}
+async function importSource(){
+ clearSourceObservation();const system=$('sourceSystem').value,externalRef=$('sourceRef').value.trim();if(!externalRef)throw Error('请填写真实来源资产引用。');
+ const result=await api('/sources/'+encodeURIComponent(system)+'/imports','POST',{externalRef});$('sourceStatus').append(statusBadge(result.status));$('sourceOutput').textContent=JSON.stringify(result,null,2);
+ if(result.status==='NOT_CONFIGURED'){notice('该来源尚未配置连接。没有导入资产，也没有产生成功验证。',true);return}
+ if(result.fingerprint&&result.snapshotId&&result.metadata&&['OBSERVED','IMPORTED','VERIFIED'].includes(result.status)){sourceObservation={...result,system:result.system||system,externalRef:result.externalRef||externalRef};$('attachSource').disabled=false;renderTimeMappings();notice('真实来源快照已记录；可显式附加绑定。业务模型仍需人工确认。')}
+ else notice('导入未取得可绑定的成功观察，请查看状态和限制。',true);
+}
+function renderTimeMappings(){
+ const box=$('sourceTimeMappings');box.replaceChildren();let spec;try{spec=JSON.parse($('spec').value)}catch{return}
+ if($('type').value!=='Dataset'||!Array.isArray(spec.model?.time?.roles)){box.append(element('p','请先在 Dataset 编辑器声明时间角色，再重新导入来源并选择物理时间字段。','muted'));return}
+ box.append(element('h3','由作者确认时间角色与物理字段的对应关系'));
+ for(const role of spec.model.time.roles){const id='sourceTime_'+role;const label=element('label',role+' 对应的真实来源时间字段');label.htmlFor=id;const select=element('select');select.id=id;select.dataset.role=role;const placeholder=element('option','请选择实际时间字段');placeholder.value='';select.append(placeholder);for(const field of sourceObservation.metadata.timeFields||[]){const option=element('option',field);option.value=field;select.append(option)}box.append(label,select)}
+}
+function attachSource(){
+ if(!sourceObservation)throw Error('请先成功导入真实来源快照。');if($('type').value!=='Dataset')throw Error('请先新建或打开 Dataset 草稿；然后回到来源资产附加绑定。');
+ const spec=JSON.parse($('spec').value);if(spec.schemaVersion!==2||!spec.model?.grain)throw Error('当前编辑器不是类型化 Dataset。');const timeFields={};
+ for(const role of spec.model.time.roles){const selection=$('sourceTime_'+role);if(!selection||!selection.value||!sourceObservation.metadata.timeFields.includes(selection.value))throw Error('请为 '+role+' 显式选择真实来源时间字段；不会自动推断时间含义。');timeFields[role]=selection.value}
+ const binding={sourceSystem:sourceObservation.system,externalRef:sourceObservation.externalRef,fingerprint:sourceObservation.fingerprint,timeFields};spec.bindings=(spec.bindings||[]).filter(b=>b.sourceSystem!==binding.sourceSystem||b.externalRef!==binding.externalRef);spec.bindings.push(binding);$('spec').value=JSON.stringify(spec,null,2);view('create');notice('已附加来源绑定和作者确认的时间字段映射，未改变主体或粒度。请确认模型后保存并检查。');
+}
+async function showImpactData(){$('impactOutput').textContent=JSON.stringify(await api('/impact?entityId='+encodeURIComponent($('impactEntity').value.trim())),null,2)}
+async function loadGaps(){const result=await api('/gaps');const rows=Array.isArray(result)?result:result.gaps||[];const box=$('gapList');box.replaceChildren();if(!rows.length)box.append(element('p','当前没有改进记录；这不表示未接入的数据系统已经通过检查。','empty'));for(const row of rows){const section=element('section',undefined,'item');section.append(statusBadge(row.status||row.state),element('h3',row.entity_id||row.entityId||row.kind||'验证改进记录'),jsonBlock(row));box.append(section)}}
+for(const button of document.querySelectorAll('.tab'))button.onclick=()=>{const target=button.dataset.view;if(target==='create'&&editingDraftId){view('create');return}view(target)};
+$('refresh').onclick=()=>safe(refreshData);
+$('newDomain').onclick=()=>safe(async()=>{const code=prompt('领域代码（小写英文字母、数字和下划线）');if(!code)return;const displayName=prompt('领域显示名称');if(!displayName)return;const ownerTeam=prompt('负责团队');if(!ownerTeam)return;await api('/domains','POST',{code,displayName,ownerTeam});await refreshData();beginNew(code)});
+$('cancelEdit').onclick=()=>safe(()=>beginNew());$('type').onchange=()=>safe(()=>{editMode(null);fillTemplate()});$('objectFamily').onchange=()=>safe(fillTemplate);
+$('template').onclick=()=>safe(fillTemplate);$('entity').onchange=()=>safe(syncRef);$('modelVersion').onchange=()=>safe(syncRef);
+$('saveDraft').onclick=()=>safe(saveDraft);$('saveValidate').onclick=()=>safe(async()=>{const row=await saveDraft();showValidation(await api('/drafts/'+row.id+'/validate','POST',{}),'发布前检查')});
+$('sourceConfiguration').onclick=()=>safe(sourceConfiguration);$('importSource').onclick=()=>safe(importSource);$('attachSource').onclick=()=>safe(attachSource);
+$('sourceSystem').onchange=clearSourceObservation;$('sourceRef').oninput=clearSourceObservation;$('showImpact').onclick=()=>safe(showImpactData);$('loadGaps').onclick=()=>safe(loadGaps);
+fillTemplate();
 </script></body></html>

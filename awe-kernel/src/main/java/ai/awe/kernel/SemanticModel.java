@@ -47,6 +47,8 @@ public sealed interface SemanticModel extends AweDefinition
             if(observationTimeField==null || observationTimeField.isBlank()
                     || availableAtField==null || availableAtField.isBlank())
                 throw new IllegalArgumentException("Feature requires observation and availability timestamps");
+            if(observationTimeField.equals(availableAtField))
+                throw new IllegalArgumentException("Feature observation and availability must be distinct fields");
             if(!time.supportsHistoricalAsOf())
                 throw new IllegalArgumentException("Feature must support availability-aware historical as-of");
         }
