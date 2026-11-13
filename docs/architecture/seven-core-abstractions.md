@@ -17,6 +17,7 @@ F0/F1a 建立基础契约与 PostgreSQL Registry；七类抽象随后进入 **Ja
 ## 基础约束
 
 - **七类是元模型，不等于七种数仓业务实体。** 例如 DAU 是 SemanticModel.Metric 的发布实例；用户实体的类型是 ObjectType；用户记录还在数据系统，不在知识图中。
+- **DataTask 是运行协议，不是第八类元模型。** 外部任务引用、自有数据操作、计划、来源 Run 和证据按职责关联；不把 Agent 工作流、思考过程或完整任务状态纳入 Registry。请求候选与服务端解析/授权事实分开，详见 [ADR-016](adr-016-data-task-and-responsibility-boundaries.md)。
 - **统一的规范不是任意 YAML schema。** 编译/发布路径必须根据类型生成和验证同样的契约；反序列化层必须变成 Java 强类型值对象，并拒绝未知字段或不受支持语义。
 - **ObjectType 定义实体类别，BusinessEntity 是对象家族分类；SemanticModel 又保留 Dataset/Metric/Feature 三个可扩展分支**，不会把算法 Feature 当作 Metric。
 - **LinkType 和 RelationContract 不是重复权威。** LinkType 定义可发布关系；RelationContract 是编译时的 Join Safety 约束；关系边不是天然可 JOIN 的 SQL。
