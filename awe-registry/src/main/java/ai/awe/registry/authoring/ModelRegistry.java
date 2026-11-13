@@ -9,6 +9,7 @@ import ai.awe.kernel.model.FunctionDefinition;
 import ai.awe.kernel.model.LinkType;
 import ai.awe.kernel.model.SemanticModel;
 import ai.awe.registry.audit.ModelCheckLog;
+import ai.awe.registry.model.DatasetExtractProfile;
 import ai.awe.registry.model.ModelCompatibility;
 import ai.awe.registry.model.ModelValidation;
 import ai.awe.registry.model.PhysicalContractChecks;
@@ -534,8 +535,12 @@ public class ModelRegistry {
         for (var ref : typed.references(model)) addRef(refs, ref);
         for (JsonNode ref : spec.path("dependsOn"))
             addRef(refs, new EntityRef(text(ref, "id"), text(ref, "modelVersion")));
-        if (model instanceof FunctionDefinition f)
+        if (model instanceof FunctionDefinition f) {
             for (String ref : f.requiredAssertions()) addRef(refs, assertionRef(ref));
+            // 执行 Profile 的返回 Schema 是正式版本依赖，必须进入发布 Hash 与依赖清单。
+            if (DatasetExtractProfile.matches(f))
+                addRef(refs, DatasetExtractProfile.parseResultRef(f.resultSchemaRef()));
+        }
         if (model instanceof ActionDefinition a)
             for (String ref : a.postconditionAssertions()) addRef(refs, assertionRef(ref));
         for (var ref : refs.values()) {
@@ -561,9 +566,30 @@ public class ModelRegistry {
             requireTarget(l.fromType(), "ObjectType", "Dataset", "Metric", "Feature");
             requireTarget(l.toType(), "ObjectType", "Dataset", "Metric", "Feature");
         }
-        if (model instanceof FunctionDefinition f)
+        if (model instanceof FunctionDefinition f) {
             for (String ref : f.requiredAssertions())
                 requireTarget(assertionRef(ref), "EvidenceAssertion");
+            if (DatasetExtractProfile.matches(f)) {
+                requireTarget(f.ownerType(), "Dataset");
+                EntityRef resultRef = DatasetExtractProfile.parseResultRef(f.resultSchemaRef());
+                requireTarget(resultRef, "ObjectType");
+                var owner = target(f.ownerType());
+                var ownerSpec = json.parse((String) owner.get("spec"));
+                var row = target(resultRef);
+                var dataset = (SemanticModel.Dataset) typed.decode("Dataset", ownerSpec);
+                var rowSchema =
+                        (ai.awe.kernel.model.ObjectType)
+                                typed.decode("ObjectType", json.parse((String) row.get("spec")));
+                DatasetExtractProfile.validate(f, dataset, rowSchema, ownerSpec);
+                requireTarget(dataset.subjectType(), "ObjectType");
+                var subject = target(dataset.subjectType());
+                DatasetExtractProfile.validateSubject(
+                        rowSchema,
+                        (ai.awe.kernel.model.ObjectType)
+                                typed.decode(
+                                        "ObjectType", json.parse((String) subject.get("spec"))));
+            }
+        }
         if (model instanceof ActionDefinition a)
             for (String ref : a.postconditionAssertions())
                 requireTarget(assertionRef(ref), "EvidenceAssertion");
@@ -728,6 +754,9 @@ public class ModelRegistry {
         EntityRef source = null;
         if (model instanceof SemanticModel.Metric m) source = m.sourceDataset();
         if (model instanceof SemanticModel.Feature f) source = f.sourceDataset();
+        // 仅已注册的取数 Profile 继承 Dataset 的真实来源 Gate，普通 Function 仍只是声明。
+        if (model instanceof FunctionDefinition f && DatasetExtractProfile.matches(f))
+            source = f.ownerType();
         if (model instanceof ContractDefinition c
                 && c.obligations().stream()
                         .anyMatch(

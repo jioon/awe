@@ -260,6 +260,9 @@
     <header>
       <h1>AWE · 数仓模型工作台</h1>
       <p>强类型建模 → 来源一致性检查 → 独立审核 → 不可变发布 → 漂移与改进记录</p>
+      <p>
+        <a href="/consumption.html" style="color: #d9eaff">使用已发布数据能力（独立消费入口）</a>
+      </p>
     </header>
     <main>
       <div class="layout">
@@ -390,7 +393,7 @@
             </div>
           </div>
           <div id="sources" class="hidden">
-            <h3>真实 Hive / BI 元数据</h3>
+            <h3>原生 PostgreSQL / Hive / BI 来源元数据</h3>
             <p class="muted">
               连接由服务端配置；浏览器不能指定任意网络地址。导入记录权威来源的版本、快照和内容指纹，不直接创建或认证业务语义。
             </p>
@@ -400,6 +403,7 @@
               <div>
                 <label for="sourceSystem">来源系统</label
                 ><select id="sourceSystem">
+                  <option value="postgres">PostgreSQL（原生 Catalog）</option>
                   <option value="hive">Hive</option>
                   <option value="bi">BI</option>
                 </select>

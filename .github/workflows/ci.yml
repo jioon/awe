@@ -37,6 +37,11 @@ jobs:
           distribution: temurin
           java-version: '21.0.13'
           cache: maven
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Verify exact numeric display parsing
+        run: node --test awe-registry/src/test/js/exact-json.test.cjs
       - name: Install checksum-verified Maven
         shell: bash
         run: |

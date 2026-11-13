@@ -74,3 +74,7 @@ MCP/API 必须鉴权；数据库/BI/调度服务端重新验权。受限 Link、
 ## ADR-016 DataTask 协议与 AWE 职责边界
 
 见 [DataTask 协议与 AWE 职责边界](adr-016-data-task-and-responsibility-boundaries.md)。固定首要约束：AWE 提供统一语义、能力、约束与证据；外部 Agent 管理总体决策与流程，现有平台执行。DataTask 是轻量版本化能力协议，不是通用任务管理或第八类元模型。限定数据计划、调用状态和证明范围，区分客户端候选与服务端事实，并将四条红线与职责反例作为新增能力评审门槛。
+
+## ADR-017 版本化数据能力与 PostgreSQL 受控取数
+
+见 [版本化数据能力与 PostgreSQL 受控取数](adr-017-controlled-dataset-consumption.md)。M1.1 以显式版本 Function/Dataset/行 Schema 约束真实取数，增加独立消费授权、原生来源观测、半开事件时间范围、预算与持久证据；当前可见数据不冒称账期到齐，结构检查不冒称独立对账或业务成功。
