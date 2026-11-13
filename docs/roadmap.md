@@ -12,6 +12,8 @@
 
 本次决策、目标架构、任务契约和迁移边界见 [ADR-015](architecture/adr-015-domain-knowledge-and-controlled-consumption.md)。目标成立以真实任务、可执行约束及独立验收为证，不以模块数量或测试数量替代。
 
+具体工程增量、退出条件与当前首切面见 [实施路线](implementation-plan.md)。M1.1 先建设已发布 Dataset 的受控真实取数，M1.2 接入已有可信 BI/指标 DIRECT 能力，M1.3 按真实任务补齐通用语义与组合计算，再满足 M1 业务准入及 M2 实际生产发布约束；不建设完整任务管理或 Agent 编排平台。
+
 ## F0—F6 保留为能力地图，不作为串行交付清单
 
 | 能力域 | 核心工程 | 真实验收问题 |
@@ -41,16 +43,16 @@ F0—F3 的第一阶段目标是一个领域的知识生产、可信消费与数
 
 ## 当前代码基线与缺口
 
-基线 `4acbbe8` 已包含：
+既有基线与 [ADR-017](architecture/adr-017-controlled-dataset-consumption.md) 的 M1.1 增量包含：
 
 - F0：基础类型、七类元模型及正反测试。
-- F1 部分：严格 v2 Registry、模型审核与不可变发布、版本/Hash/来源固定、元数据 Gate 和 Web 工作台；成熟域覆盖声明、知识库投影和完整消费尚未实现。
-- F2：尚无完整 Resolver/Semantic IR/问数取数链、真实用户委托权限和能力服务协议；Metric 当前字段不构成完整可执行计算定义。
+- F1 部分：严格 v2 Registry、模型审核与不可变发布、版本/Hash/来源固定、Hive/BI 元数据网关与原生 PostgreSQL 观测、Web 工作台；成熟域覆盖声明与知识库投影尚未实现。
+- F2 部分：DataTask v1 显式引用解析、独立消费策略、版本化 Dataset/输出行 Schema 驱动的真实 PostgreSQL 受控取数和证据；尚无完整自然语言 Resolver/Semantic IR、指标问数、真实用户委托或企业消费准入。Metric 当前字段仍不构成完整可执行计算定义。
 - F3 部分：版本 Dataset/Contract 驱动真实 PostgreSQL 只读检查，保留失败与技术恢复记录。它证明三类受限义务的执行，不是语义问数、取数或生产作业闭环。Pipeline 尚为对象家族；影响查询主要是直接依赖；技术 CLOSED 不等于业务验收。
 - F4/F5：有部分内核约束，未建立完整执行能力。
 - F6：Action 可发布声明，未执行生产写入或自主修复。
 
-既有基础应继续复用；不重新建立独立原型，不把后续目标写成当前功能。已实现边界见 [ADR-013](architecture/adr-013-typed-registry-and-source-gates.md) 和 [ADR-014](architecture/adr-014-agent-skills-and-data-verification-loop.md)。
+既有基础应继续复用；不重新建立独立原型，不把后续目标写成当前功能。已实现边界见 [ADR-013](architecture/adr-013-typed-registry-and-source-gates.md)、[ADR-014](architecture/adr-014-agent-skills-and-data-verification-loop.md) 和 [ADR-017](architecture/adr-017-controlled-dataset-consumption.md)。
 
 ## 下一轮工程优先级
 

@@ -4,6 +4,8 @@
 
 本 ADR 进一步限定 [ADR-015](adr-015-domain-knowledge-and-controlled-consumption.md) 的任务入口、计划、轨迹和改进闭环；保留其成熟域推广顺序及 F0—F6 能力划分。今后的架构评审与新增能力设计必须检查本边界。
 
+后续 [ADR-017](adr-017-controlled-dataset-consumption.md) 实现了 DataTask v1 的 EXTRACT 子协议及 PostgreSQL 受控取数；本文件中的更广能力和验收目标不能因此视为已全部交付。
+
 ## 1. 首要定位
 
 **AWE 是数据仓库面向 AI 和各类数据应用的统一语义、能力、约束与证据基础。AWE 让数据任务能够基于正式数据知识开展，不接管全部数据工作。**

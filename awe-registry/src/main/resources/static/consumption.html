@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AWE · 已发布数据能力</title>
+    <style>
+      :root {
+        font-family: Inter, "Segoe UI", system-ui, sans-serif;
+        color: #17263b;
+        background: #f4f7fb;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+      }
+      header {
+        padding: 24px max(24px, 5vw);
+        color: #fff;
+        background: #10253d;
+      }
+      header h1 {
+        margin: 0 0 8px;
+        font-size: 25px;
+      }
+      header p {
+        margin: 0 0 12px;
+        color: #bed1e7;
+        line-height: 1.7;
+        font-size: 13px;
+      }
+      a {
+        color: #1257b2;
+      }
+      header a {
+        color: #d9eaff;
+        font-size: 13px;
+      }
+      main {
+        max-width: 1440px;
+        padding: 0 18px;
+        margin: 22px auto;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 280px minmax(0, 1fr);
+        gap: 18px;
+      }
+      .panel {
+        padding: 20px;
+        background: #fff;
+        border: 1px solid #dbe3ed;
+        border-radius: 12px;
+        min-width: 0;
+      }
+      h2 {
+        margin: 0 0 14px;
+        font-size: 17px;
+      }
+      h3 {
+        margin: 20px 0 12px;
+        font-size: 14px;
+      }
+      p {
+        line-height: 1.7;
+      }
+      label {
+        display: block;
+        margin: 12px 0 6px;
+        font-size: 12px;
+        color: #516178;
+      }
+      input,
+      select,
+      button {
+        font: inherit;
+        font-size: 13px;
+        border: 1px solid #b9c7d7;
+        border-radius: 7px;
+        padding: 9px;
+      }
+      input,
+      select {
+        width: 100%;
+        background: #fff;
+        color: #17263b;
+      }
+      input:read-only,
+      input:disabled,
+      select:disabled {
+        background: #f3f6fa;
+      }
+      button {
+        color: #1b385b;
+        background: #f8fbff;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button:hover {
+        background: #e8f1fb;
+      }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      .primary {
+        background: #1257b2;
+        color: #fff;
+        border-color: #1257b2;
+      }
+      .primary:hover {
+        background: #0b468f;
+      }
+      .actions,
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin: 12px 0;
+      }
+      .row {
+        justify-content: space-between;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+      .section {
+        margin-top: 24px;
+      }
+      .muted,
+      .empty {
+        color: #637590;
+        font-size: 12px;
+      }
+      .callout {
+        padding: 11px 14px;
+        background: #f0f6fe;
+        border-left: 3px solid #4e8aca;
+        font-size: 13px;
+      }
+      .warn {
+        background: #fff8e9;
+        border-color: #bc861b;
+      }
+      .item {
+        display: block;
+        width: 100%;
+        text-align: left;
+        padding: 12px;
+        margin: 8px 0;
+        background: #fff;
+        border-color: #e1e8f0;
+        overflow-wrap: anywhere;
+      }
+      .item.active {
+        border-color: #1257b2;
+        background: #f0f6fe;
+      }
+      .item small {
+        display: block;
+        color: #637590;
+        margin-top: 5px;
+        font-weight: 400;
+      }
+      .fields {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 8px;
+      }
+      .field {
+        margin: 0;
+        padding: 10px;
+        border: 1px solid #dbe3ed;
+        border-radius: 7px;
+        overflow-wrap: anywhere;
+      }
+      .field input {
+        width: auto;
+        margin-right: 7px;
+      }
+      .badge {
+        display: inline-block;
+        padding: 3px 9px;
+        border-radius: 12px;
+        color: #2d506f;
+        background: #ebf1f7;
+        font-size: 11px;
+      }
+      .badge.good {
+        color: #17613a;
+        background: #e5f3eb;
+      }
+      .badge.warn {
+        color: #795005;
+        background: #fff1d6;
+      }
+      .badge.bad {
+        color: #9a263b;
+        background: #fee9ed;
+      }
+      .decisions {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .decision {
+        padding: 12px;
+        background: #f5f8fc;
+        border-radius: 8px;
+      }
+      .decision strong {
+        display: block;
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
+      #notice {
+        margin: 12px 0;
+        min-height: 20px;
+        color: #4e5e71;
+        font-size: 13px;
+      }
+      #notice.error {
+        color: #af2538;
+      }
+      .table-wrap {
+        overflow: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      th,
+      td {
+        padding: 10px;
+        border-bottom: 1px solid #dbe3ed;
+        text-align: left;
+        vertical-align: top;
+        overflow-wrap: anywhere;
+      }
+      .metadata th {
+        width: 165px;
+      }
+      .result-table th {
+        background: #f0f5fb;
+        white-space: nowrap;
+      }
+      .result-table th small {
+        display: block;
+        font-weight: 400;
+        color: #637590;
+      }
+      pre {
+        margin: 12px 0;
+        padding: 14px;
+        overflow: auto;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        max-height: 420px;
+        background: #f5f8fb;
+        border-radius: 8px;
+        font-size: 12px;
+      }
+      details {
+        margin-top: 16px;
+      }
+      summary {
+        font-size: 13px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .hidden {
+        display: none !important;
+      }
+      @media (max-width: 880px) {
+        .layout,
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        .decisions {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+    </style>
+    <script src="/exact-json.js" defer></script>
+    <script src="/consumption.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <h1>AWE · 已发布数据能力</h1>
+      <p>消费入口：使用已授权的 Function、明确的字段和时间范围，读取真实来源的当前事务快照。</p>
+      <a href="/">返回模型生产工作台（建模、审核与契约检查）</a>
+    </header>
+    <main>
+      <div class="layout">
+        <aside class="panel">
+          <h2>消费身份</h2>
+          <label for="consumerToken">独立消费 Token（仅在当前页面内存中使用）</label>
+          <input
+            id="consumerToken"
+            type="password"
+            autocomplete="off"
+            placeholder="不能使用 Author / Reviewer Token"
+          />
+          <div class="actions">
+            <button id="connectConsumer">加载授权能力与我的任务</button
+            ><button id="clearConsumer">清除当前页面</button>
+          </div>
+          <p class="muted">身份和授权由服务端认证。用途与外部任务引用是调用声明，不授予权限。</p>
+          <div class="section">
+            <h2>授权的已发布能力</h2>
+            <div id="capabilityList" class="empty">尚未加载</div>
+          </div>
+          <div class="section">
+            <h2>我的数据操作</h2>
+            <button id="refreshTasks" disabled>刷新当前授权范围</button>
+            <div id="taskList" class="empty">尚未加载</div>
+          </div>
+          <label for="taskLookup">操作 ID（仅当前主体、当前授权范围）</label
+          ><input id="taskLookup" autocomplete="off" />
+          <div class="actions"><button id="openTask" disabled>读取操作与证据</button></div>
+        </aside>
+        <section class="panel">
+          <div class="row">
+            <h2>明确请求，保留证据</h2>
+            <span id="sessionState" class="badge">未连接</span>
+          </div>
+          <p class="callout warn">
+            当前可见数据不保证账期到齐；观察快照中的空集不等于指标
+            0。技术检查通过也不代表外部整体业务任务已经完成。
+          </p>
+          <div id="notice" role="status" aria-live="polite"></div>
+          <section id="requestPanel">
+            <h3>选择真实已发布 Function</h3>
+            <p id="capabilityEmpty" class="empty">
+              加载授权能力后选择一个已发布版本。没有配置或授权时显示服务端实际响应，不生成示例资产。
+            </p>
+            <div id="capabilityDetails" class="hidden">
+              <h3 id="capabilityHeading"></h3>
+              <div id="capabilityPointers"></div>
+              <details>
+                <summary>能力范围、预算与限制</summary>
+                <pre id="capabilityScope"></pre>
+              </details>
+              <h3>选择本次投影字段</h3>
+              <div id="fieldChoices" class="fields"></div>
+              <p class="muted">
+                只显示服务端明确授权且非敏感的字段；没有自由 SQL、表达式或隐藏字段入口。
+              </p>
+              <div class="grid">
+                <div>
+                  <label for="rangeFrom">起点 from（包含；ISO 8601，明确 Z 或 ±HH:MM）</label
+                  ><input
+                    id="rangeFrom"
+                    type="text"
+                    autocomplete="off"
+                    placeholder="请输入带时区的起点；不推断昨天或最新账期"
+                  />
+                </div>
+                <div>
+                  <label for="rangeTo">终点 to（不包含；ISO 8601，明确 Z 或 ±HH:MM）</label
+                  ><input
+                    id="rangeTo"
+                    type="text"
+                    autocomplete="off"
+                    placeholder="请输入带时区的终点"
+                  />
+                </div>
+              </div>
+              <p id="timeScope" class="muted"></p>
+              <div class="grid">
+                <div>
+                  <label for="consumerPurpose">服务端允许的用途声明</label
+                  ><select id="consumerPurpose"></select>
+                </div>
+                <div>
+                  <label>读取视图</label>
+                  <p class="callout">
+                    OBSERVED_SNAPSHOT · 当前事务可见范围；数据就绪仍为 UNKNOWN。
+                  </p>
+                </div>
+              </div>
+              <div class="grid">
+                <div>
+                  <label for="requestMaxRows">本次最大行数</label
+                  ><input id="requestMaxRows" type="number" min="1" step="1" />
+                </div>
+                <div>
+                  <label for="requestMaxBytes">本次最大行载荷字节数（UTF-8）</label
+                  ><input id="requestMaxBytes" type="number" min="1" step="1" />
+                </div>
+              </div>
+              <details>
+                <summary>可选：关联外部任务</summary>
+                <p class="muted">
+                  仅关联外部责任方的任务，不保存或判定其完整流程、计划或整体完成状态。
+                </p>
+                <div class="grid">
+                  <div>
+                    <label for="externalIssuer">外部来源 issuer</label
+                    ><input id="externalIssuer" maxlength="120" autocomplete="off" />
+                  </div>
+                  <div>
+                    <label for="externalTaskId">外部任务 id</label
+                    ><input id="externalTaskId" maxlength="240" autocomplete="off" />
+                  </div>
+                </div>
+              </details>
+              <label for="taskRequestKey"
+                >幂等请求键（在途重试保留；收到终态后自动换键，新的点击读取新快照）</label
+              ><input id="taskRequestKey" maxlength="120" autocomplete="off" />
+              <div class="actions">
+                <button id="newTaskKey">生成新请求键</button
+                ><button id="previewTask">检查请求内容</button
+                ><button id="submitTask" class="primary" disabled>提交一次受控取数</button>
+              </div>
+              <details id="requestPreview">
+                <summary>实际提交的 DataTask v1</summary>
+                <pre id="requestOutput">尚未生成请求；凭据不会写入请求正文。</pre>
+              </details>
+            </div>
+          </section>
+          <section id="taskDetail" class="hidden section">
+            <div class="row">
+              <h2 id="taskHeading">数据操作证据</h2>
+              <span id="operationStatus" class="badge"></span>
+            </div>
+            <div class="actions"><button id="reloadTask">重新读取当前操作与载荷状态</button></div>
+            <div id="decisionAxes" class="decisions"></div>
+            <h3>本次数据结果</h3>
+            <div id="resultSummary"></div>
+            <div id="typedRows" class="table-wrap"></div>
+            <details open>
+              <summary>精确发布、输入范围和实际事务快照</summary>
+              <div id="taskPointers"></div>
+              <pre id="taskScope"></pre>
+            </details>
+            <details>
+              <summary>来源 Gate 与本次验证</summary>
+              <pre id="taskVerification"></pre>
+            </details>
+            <details open>
+              <summary>验证范围与已知限制</summary>
+              <div id="taskLimitations"></div>
+            </details>
+            <details>
+              <summary>服务端留存的操作证据（不重复展开行载荷）</summary>
+              <pre id="taskEvidence"></pre>
+            </details>
+          </section>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>
