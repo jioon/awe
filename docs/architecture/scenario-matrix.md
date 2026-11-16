@@ -115,7 +115,7 @@ DataTask/消费协议交付时优先验证 B05—B09 的服务端信任边界，
 | ID | 触发与预期 | 可执行证据 |
 |---|---|---|
 | E01 | v3 计算契约严格解码、静态类型/可空性及粒度反例，单位显式声明；v2 旧规范与 Hash 保持 | RelationalContractsTest、ExecutableFacetCodecTest |
-| E02 | 真实分组/去重/SUM/比率、集合和日历窗口；空输入、全 NULL、0 分开 | MetricQueryIntegrationTest、RelationalSqlCompilerTest |
+| E02 | 真实分组/去重/SUM/比率、集合和日历窗口；权威统计身份/去重操作数/改名和混用人群反例；空输入、全 NULL、0 分开 | MetricQueryIntegrationTest、RelationalSqlCompilerTest |
 | E03 | 正式 Link、静态快照及真实唯一性；非法 Join、来源漂移、实际扫描预算拒绝 | MetricQueryIntegrationTest |
 | E04 | BI DIRECT 精确实现/请求/快照；独立 SQL 识别结构正确但值错误；滚动依赖未覆盖不能 READY | BiMetricQueryIntegrationTest、BiMetricAdapterTest |
 | E05 | 真实 JWT/委托及每源强制行条件；EXTRACT 绑定参数防条件注入；政策变更隐藏旧证据 | DelegatedMetricQueryIntegrationTest、DatasetConsumptionIntegrationTest、TrustedIdentityTest |
@@ -125,4 +125,4 @@ DataTask/消费协议交付时优先验证 B05—B09 的服务端信任边界，
 | E09 | 错制品/删义务/伪 PASSED/陈旧与实际过期批准/新增影响不能准入；并发消费幂等 | ProductionAdmissionIntegrationTest |
 | E10 | 新写许可先封旧证明、同 Schema 语义替换、共享物理实现影响与确切版本查询 | ProductionAdmissionIntegrationTest、LogicalSourceRealizationTest |
 
-本轮实际运行：237 项 Java 测试（其中 71 项 PostgreSQL/HTTP 集成）、4 项无损 JSON 前端测试，零失败/零跳过。浏览器以独立只读 PostgreSQL 身份完成真实 EXTRACT、正式指标值、精确知识确认和生产未配置状态检查；M2 完整部署链由真实 SQL/CAS 集成验证。数量是该增量记录，后续以 CI 报告为准。
+本轮实际运行：238 项 Java 测试（其中 72 项 PostgreSQL/HTTP 集成）、4 项无损 JSON 前端测试，零失败/零跳过。浏览器以独立只读 PostgreSQL 身份完成真实 EXTRACT、正式指标值、精确知识确认和生产未配置状态检查；M2 完整部署链由真实 SQL/CAS 集成验证。数量是该增量记录，后续以 CI 报告为准。

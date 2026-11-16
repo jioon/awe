@@ -14,6 +14,7 @@ import ai.awe.registry.audit.ModelCheckLog;
 import ai.awe.registry.model.DatasetExtractProfile;
 import ai.awe.registry.model.DatasetReadProfile;
 import ai.awe.registry.model.LogicalDatasetBindings;
+import ai.awe.registry.model.MetricIdentityChecks;
 import ai.awe.registry.model.MetricQueryProfile;
 import ai.awe.registry.model.ModelCompatibility;
 import ai.awe.registry.model.ModelValidation;
@@ -725,6 +726,16 @@ public class ModelRegistry {
         var schemas = new LinkedHashMap<String, ObjectType>();
         sources.forEach((alias, source) -> schemas.put(alias, source.schema()));
         SemanticPlanTypes.validate(contract, schemas);
+        var datasets = new LinkedHashMap<String, SemanticModel.Dataset>();
+        sources.forEach((alias, source) -> datasets.put(alias, source.dataset()));
+        var subject =
+                (ObjectType)
+                        typed.decode(
+                                "ObjectType",
+                                json.parse(
+                                        (String)
+                                                target(contract.statisticalSubject()).get("spec")));
+        MetricIdentityChecks.validate(metric, contract, subject, datasets, schemas);
         validateJoins(contract.plan(), sources);
         var kinds = new HashSet<RelationalIR.AggregateKind>();
         var arithmetic = new HashSet<RelationalIR.ArithmeticOp>();

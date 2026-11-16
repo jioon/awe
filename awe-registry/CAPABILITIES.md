@@ -16,7 +16,7 @@ Dataset 的读能力：事件窗口使用 `dataset.scan.v1`，必需 from/to TIM
 
 指标读能力为 `metric.query.v1`，owner 为 v3 Metric，必需 from/to TIMESTAMP；`resultSchemaRef` 为 Metric 自身 `id@modelVersion`。执行器为 `postgres.metric.query.v1` 或 `bi.metric.query.v1`；BI 要求完整 DIRECT 绑定，不自动回退。
 
-IR 只含类型化 Scan、Filter、Project、Aggregate、Join、集合运算；表达式含字段、类型化常量、业务日和算术。JSON 使用 `kind` 标签；Scan 窗口偏移按模型时区的日历日计算；Join/集合/算术分别使用 `joinKind`/`operation`。执行前检查字段类型/可空性、字段来源、Link 和预算，并校验实际关联唯一性与输出粒度。单位是发布与版本绑定的显式声明，当前不自动推导任意表达式的物理量纲或单位换算；需领域审核和独立参考。NULL 身份 IGNORE/REJECT 在已授权输入总体上实施。空输入的 ZERO 与有记录但聚合值为 NULL 不混同。
+IR 只含类型化 Scan、Filter、Project、Aggregate、Join、集合运算；表达式含字段、类型化常量、业务日和算术。JSON 使用 `kind` 标签；Scan 窗口偏移按模型时区的日历日计算；Join/集合/算术分别使用 `joinKind`/`operation`。执行前检查字段类型/可空性、字段来源、Link 和预算，并校验实际关联唯一性与输出粒度。单位是发布与版本绑定的显式声明，当前不自动推导任意表达式的物理量纲或单位换算；需领域审核和独立参考。统计身份必须来自该源权威主体的单字段键，COUNT_DISTINCT 的输出操作数必须保留该身份来源；事件号改名不能成为用户身份，集合两侧也不能混用统计对象。复合/转换身份需显式受支持的身份模型，不能自动推断。NULL 身份 IGNORE/REJECT 在已授权输入总体上实施。空输入的 ZERO 与有记录但聚合值为 NULL 不混同。
 
 完整有效模型样本及独立 SQL 断言见 [MetricQueryIntegrationTest](src/test/java/ai/awe/registry/MetricQueryIntegrationTest.java)、[共享模型构造](src/test/java/ai/awe/registry/MetricQueryTestSupport.java)；严格编码和 v2/v3 兼容反例见 [ExecutableFacetCodecTest](src/test/java/ai/awe/registry/ExecutableFacetCodecTest.java)。
 
@@ -82,6 +82,6 @@ readiness 包含 state、observedAt、snapshotRef、runRef、completeFrom/Throug
 
 `POST /api/feedback` 关联 observationId、issueCode、stage、description；作者通过 `/{id}/reviews` 记录 classification/ownerTeam/externalIssueRef/note。用户声明不自动成为根因。
 
-`POST /api/regressions/cases` 关联 observationId、expectedState、expectedFingerprint、referenceBasis、referenceEvidenceRef；审核者 `/{id}/approve` 后，消费者 `/{id}/replays` 以新 idempotencyKey 真实重放。Reviewer `POST /api/feedback/{id}/closures` 必须引用匹配且成功的回归证据。模型、请求范围、政策、物理绑定、实现不一致不能关闭原问题。完整字段及反例见 [KnowledgeLoopIntegrationTest](src/test/java/ai/awe/registry/KnowledgeLoopIntegrationTest.java)。
+`POST /api/regressions/cases` 关联 observationId、expectedState、expectedFingerprint、referenceBasis、referenceEvidenceRef；审核者 `/{id}/approve` 后，消费者 `/{id}/replays` 以新 idempotencyKey 真实重放。Reviewer `POST /api/feedback/{id}/closures` 必须引用匹配且成功的回归证据。模型、请求范围、政策、物理绑定、实现不一致不能关闭原问题。改变正式语义或政策后需建立新版本参考义务并做显式迁移/业务验收；当前不自动证明跨版本等价，也不借新版本回放给旧问题发绿灯。完整字段及反例见 [KnowledgeLoopIntegrationTest](src/test/java/ai/awe/registry/KnowledgeLoopIntegrationTest.java)。
 
 工作台 `/consumption.html` 保留真实 EXTRACT，`/metric-consumption.html` 消费指标并查看阶段/证明，`/knowledge.html` 展示解析、覆盖和修复回归。页面不存储 Token，不默认猜日期，不内置模拟答案。领域问题、角色和来源仍须真实配置。

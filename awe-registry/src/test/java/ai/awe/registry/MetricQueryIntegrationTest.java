@@ -605,6 +605,134 @@ final class MetricQueryIntegrationTest extends MetricQueryTestSupport {
     }
 
     @Test
+    void sameTypedEventIdsCannotBePublishedAsTheAuthoritativeUserPopulation() throws Exception {
+        for (String variant :
+                List.of(
+                        "binding",
+                        "operand",
+                        "renamed_operand",
+                        "mixed_population",
+                        "aggregate_as_grain")) {
+            String suffix = "bad_identity_" + variant;
+            Object input = excludeUnknownIdentity(scan());
+            Object operand = field("events.event_id");
+            if (variant.equals("aggregate_as_grain")) operand = field("events.user_id");
+            if (variant.equals("binding")) operand = field("events.user_id");
+            if (variant.equals("renamed_operand")) {
+                input =
+                        Map.of(
+                                "kind",
+                                "PROJECT",
+                                "input",
+                                input,
+                                "columns",
+                                List.of(
+                                        Map.of(
+                                                "name",
+                                                "user_id",
+                                                "expression",
+                                                field("events.event_id"))));
+                operand = field("user_id");
+            }
+            if (variant.equals("mixed_population")) {
+                input =
+                        Map.of(
+                                "kind",
+                                "SET",
+                                "operation",
+                                "EXCEPT_DISTINCT",
+                                "left",
+                                Map.of(
+                                        "kind",
+                                        "PROJECT",
+                                        "input",
+                                        excludeUnknownIdentity(scan()),
+                                        "columns",
+                                        List.of(
+                                                Map.of(
+                                                        "name",
+                                                        "user_id",
+                                                        "expression",
+                                                        field("events.user_id")))),
+                                "right",
+                                Map.of(
+                                        "kind",
+                                        "PROJECT",
+                                        "input",
+                                        scan(),
+                                        "columns",
+                                        List.of(
+                                                Map.of(
+                                                        "name",
+                                                        "user_id",
+                                                        "expression",
+                                                        field("events.event_id")))));
+                operand = field("user_id");
+            }
+            var document =
+                    metricSpec(
+                            DOMAIN,
+                            suffix,
+                            "COUNT_DISTINCT",
+                            "users",
+                            aggregate(
+                                    input,
+                                    List.of(),
+                                    List.of(measure("value", "COUNT_DISTINCT", operand))),
+                            List.of(output("value", "INTEGER", "users", false)),
+                            List.of(),
+                            null);
+            if (variant.equals("binding"))
+                ((ObjectNode) document.path("metricContract"))
+                        .put("identityField", "events.event_id");
+            if (variant.equals("aggregate_as_grain")) {
+                ((ObjectNode) document.path("model").path("grain")).putArray("keys").add("value");
+                var contract = (ObjectNode) document.path("metricContract");
+                contract.putArray("grain").add("value");
+                contract.put("emptyPolicy", "NO_RECORD");
+            }
+            var draft =
+                    ok(
+                            "POST",
+                            "/api/drafts",
+                            AUTHOR,
+                            Map.of(
+                                    "domain",
+                                    DOMAIN,
+                                    "entityId",
+                                    "metric." + DOMAIN + "." + suffix,
+                                    "entityType",
+                                    "Metric",
+                                    "spec",
+                                    document));
+            var validation =
+                    ok(
+                            "POST",
+                            "/api/drafts/" + draft.path("id").asText() + "/validate",
+                            AUTHOR,
+                            Map.of());
+            assertFalse(validation.path("valid").asBoolean(), validation.toString());
+            assertTrue(
+                    validation.path("errors").toString().contains("identity"),
+                    validation.toString());
+            assertEquals(
+                    400,
+                    send(
+                                    "POST",
+                                    "/api/drafts/" + draft.path("id").asText() + "/submit",
+                                    AUTHOR,
+                                    Map.of())
+                            .statusCode());
+            assertEquals(
+                    0,
+                    db.queryForObject(
+                            "SELECT count(*) FROM awe_release WHERE entity_id=?",
+                            Integer.class,
+                            "metric." + DOMAIN + "." + suffix));
+        }
+    }
+
+    @Test
     void droppingPhysicalJoinUniquenessCannotTurnAReviewedLinkIntoFanout() throws Exception {
         db.execute("ALTER TABLE " + USERS + " DROP CONSTRAINT awe_metric_users_pkey");
         try {

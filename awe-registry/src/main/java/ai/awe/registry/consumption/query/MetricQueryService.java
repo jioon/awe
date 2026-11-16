@@ -778,6 +778,19 @@ public final class MetricQueryService {
             var release = dependency(metricRelease, ref, "LinkType");
             links.put(ref, (LinkType) typed.decode("LinkType", (JsonNode) release.get("spec")));
         }
+        var identityDatasets = new LinkedHashMap<String, SemanticModel.Dataset>();
+        var identitySchemas = new LinkedHashMap<String, ObjectType>();
+        sources.forEach(
+                (alias, source) -> {
+                    identityDatasets.put(alias, source.dataset());
+                    identitySchemas.put(alias, source.rowSchema());
+                });
+        MetricIdentityChecks.validate(
+                metric,
+                contract,
+                (ObjectType) typed.decode("ObjectType", (JsonNode) subject.get("spec")),
+                identityDatasets,
+                identitySchemas);
         return new Resolved(
                 functionRelease,
                 metricRelease,
