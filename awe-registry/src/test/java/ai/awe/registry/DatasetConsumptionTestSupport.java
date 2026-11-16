@@ -123,7 +123,46 @@ abstract class DatasetConsumptionTestSupport {
                                         "maxBytes",
                                         4096,
                                         "maxWindowSeconds",
-                                        86400)));
+                                        86400),
+                                Map.of(
+                                        "principal",
+                                        "consumer-scoped",
+                                        "token",
+                                        "consumption-scoped-token",
+                                        "functionIds",
+                                        ids,
+                                        "purposes",
+                                        List.of(PURPOSE),
+                                        "fields",
+                                        List.of("event_id", "user_id", "event_time"),
+                                        "maxRows",
+                                        20,
+                                        "maxBytes",
+                                        4096,
+                                        "maxWindowSeconds",
+                                        86400,
+                                        "rowScopes",
+                                        List.of(
+                                                Map.of(
+                                                        "datasetId",
+                                                        "dataset.consume.events",
+                                                        "fields",
+                                                        List.of(
+                                                                "event_id",
+                                                                "user_id",
+                                                                "event_time"),
+                                                        "filters",
+                                                        List.of(
+                                                                Map.of(
+                                                                        "field",
+                                                                        "user_id",
+                                                                        "operation",
+                                                                        "EQ",
+                                                                        "type",
+                                                                        "STRING",
+                                                                        "values",
+                                                                        List.of(
+                                                                                "user_1' OR '1'='1"))))))));
     }
 
     @BeforeAll

@@ -1,7 +1,7 @@
 package ai.awe.registry.api;
 
 import ai.awe.registry.consumption.ConsumerAccess;
-import ai.awe.registry.consumption.DataTaskService;
+import ai.awe.registry.consumption.DataTaskOperations;
 import ai.awe.registry.support.JsonDocuments;
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
@@ -13,10 +13,10 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping(value = "/api", produces = MediaType.APPLICATION_JSON_VALUE)
 public final class DataTaskApi {
-    private final DataTaskService tasks;
+    private final DataTaskOperations tasks;
     private final JsonDocuments json;
 
-    public DataTaskApi(DataTaskService tasks, JsonDocuments json) {
+    public DataTaskApi(DataTaskOperations tasks, JsonDocuments json) {
         this.tasks = tasks;
         this.json = json;
     }
@@ -30,7 +30,20 @@ public final class DataTaskApi {
     public String create(@RequestBody String body, HttpServletRequest request) {
         if (body.getBytes(StandardCharsets.UTF_8).length > 65_536)
             throw new IllegalArgumentException("Data capability request exceeds 64 KiB");
-        return json.write(tasks.create(json.object(body), grant(request)));
+        var identity = request.getAttribute("awe.identity");
+        return json.write(
+                tasks.create(
+                        json.object(body),
+                        grant(request),
+                        identity
+                                        instanceof
+                                        ai.awe.registry.identity.TrustedOidcVerifier.Identity actual
+                                ? actual.toEvidence()
+                                : java.util.Map.of(
+                                        "mechanism",
+                                        "SERVICE_POLICY",
+                                        "principal",
+                                        grant(request).principal())));
     }
 
     @GetMapping("/data-tasks")

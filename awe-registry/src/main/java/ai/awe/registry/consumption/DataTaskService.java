@@ -88,12 +88,23 @@ public final class DataTaskService {
             } catch (IllegalArgumentException | NoSuchElementException ex) {
                 continue;
             }
+            Set<String> inputFields;
+            try {
+                inputFields = access.inputFields(grant, resolved.dataset().ref().id());
+                access.scope(grant, resolved.dataset().ref().id(), "extract", resolved.schema());
+                if (!inputFields.contains(
+                        resolved.binding().path("timeFields").path("EVENT_TIME").asText()))
+                    continue;
+            } catch (ResponseStatusException denied) {
+                continue;
+            }
             var fields =
                     resolved.schema().properties().stream()
                             .filter(
                                     p ->
                                             !sensitive(resolved, p.name())
-                                                    && grant.fields().contains(p.name()))
+                                                    && grant.fields().contains(p.name())
+                                                    && inputFields.contains(p.name()))
                             .map(
                                     p ->
                                             Map.<String, Object>of(
@@ -167,6 +178,11 @@ public final class DataTaskService {
         manifest.put("businessZone", resolved.dataset().time().businessZone().getId());
         manifest.put("mapping", "SAME_NAME_COLUMNS");
         manifest.put("executor", DatasetExtractProfile.EXECUTOR);
+        manifest.put("policyHash", grant.policyHash());
+        // 强制行条件来自服务端，绑定到计划证据，消费者不能覆盖或省略。
+        var rowScope =
+                access.scope(grant, resolved.dataset().ref().id(), "extract", resolved.schema());
+        rowScope.ifPresent(value -> manifest.put("rowScope", typed.encodeValue(value)));
         String planHash = json.sha256(json.object(json.write(manifest)));
         manifest.put("planHash", planHash);
         UUID id = UUID.randomUUID();
@@ -240,7 +256,8 @@ public final class DataTaskService {
                                             task.requirements().from(),
                                             task.requirements().to(),
                                             task.constraints().maxRows(),
-                                            task.constraints().maxBytes()));
+                                            task.constraints().maxBytes()),
+                                    rowScope);
                     status = extracted.status();
                     limits.addAll(extracted.limitations());
                 }
@@ -323,10 +340,13 @@ public final class DataTaskService {
 
     public Map<String, Object> get(UUID id, ConsumerAccess.Grant grant) {
         var row = stored(id, grant.principal());
+        if (!grant.policyHash().equals(row.get("policy_hash")))
+            throw new NoSuchElementException(
+                    "Data operation not found in current authorized scope");
         DataTask task = DataTaskRequests.decode(json.parse((String) row.get("request_doc")));
         JsonNode manifest = json.parse((String) row.get("resolved"));
         try {
-            access.authorize(
+            access.authorizeQuery(
                     grant,
                     manifest.path("function").path("entityId").asText(),
                     task.consumer().purpose(),
@@ -435,7 +455,7 @@ public final class DataTaskService {
     }
 
     private void authorize(DataTask task, ConsumerAccess.Grant grant, Resolved resolved) {
-        access.authorize(
+        access.authorizeQuery(
                 grant,
                 resolved.function().ref().id(),
                 task.consumer().purpose(),
@@ -444,6 +464,13 @@ public final class DataTaskService {
                 task.constraints().maxBytes(),
                 task.requirements().from(),
                 task.requirements().to());
+        Set<String> allowedInputs = access.inputFields(grant, resolved.dataset().ref().id());
+        String eventColumn = resolved.binding().path("timeFields").path("EVENT_TIME").asText();
+        if (!allowedInputs.containsAll(task.requirements().fields())
+                || !allowedInputs.contains(eventColumn))
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN, "Input fields are outside the configured Dataset scope");
+        access.scope(grant, resolved.dataset().ref().id(), "extract", resolved.schema());
         for (String name : task.requirements().fields()) {
             var property =
                     resolved.schema().properties().stream()

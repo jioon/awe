@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>AWE · Pipeline变更准入</title>
+    <link rel="stylesheet" href="/workbench-pages.css" />
+    <script src="/exact-json.js" defer></script>
+    <script src="/workbench-pages.js" defer></script>
+    <script src="/production.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <h1>AWE · Pipeline变更准入</h1>
+      <p>固定输入输出、制品、影响与回归；外部工程平台保留发布、CAS、修复和回滚责任。</p>
+      <nav class="entry-links">
+        <a href="/">模型生产</a><a href="/consumption.html">Dataset取数</a
+        ><a href="/metric-consumption.html">正式指标</a><a href="/knowledge.html">知识与反馈</a
+        ><a href="/production.html">变更准入</a>
+      </nav>
+    </header>
+    <main>
+      <section class="panel">
+        <div class="token-grid">
+          <div>
+            <label for="productionAuthorToken">作者Token</label
+            ><input
+              id="productionAuthorToken"
+              type="password"
+              aria-label="作者Token"
+              autocomplete="off"
+              value=""
+            />
+          </div>
+          <div>
+            <label for="productionReviewerToken">独立Reviewer Token</label
+            ><input
+              id="productionReviewerToken"
+              type="password"
+              aria-label="独立Reviewer Token"
+              autocomplete="off"
+              value=""
+            />
+          </div>
+          <div>
+            <label for="productionPlatformToken">独立部署平台Token</label
+            ><input
+              id="productionPlatformToken"
+              type="password"
+              aria-label="独立部署平台Token"
+              autocomplete="off"
+              value=""
+            />
+          </div>
+        </div>
+        <div id="notice" role="status" aria-live="polite"></div>
+        <p class="callout warn">
+          所有列表、判断和证据均来自实际API。未知、未配置、未就绪或缺少验证不转为成功；AWE不执行任意脚本、编排Agent流程或替代外部整体业务验收。
+        </p>
+        <div class="stack">
+          <fieldset>
+            <legend>正式Pipeline与受控制品 · 作者</legend>
+            <button id="loadProductionPipelines" type="button">读取真实已发布Pipeline</button
+            ><label for="productionPipeline">实际Pipeline发布</label
+            ><select id="productionPipeline">
+              <option value="">尚未加载</option>
+            </select>
+            <div class="grid">
+              <label for="productionPipelineId">实际Pipeline Release ID</label
+              ><input
+                id="productionPipelineId"
+                type="text"
+                aria-label="实际Pipeline Release ID"
+                autocomplete="off"
+                value=""
+              /><label for="productionPipelineHash">实际Pipeline内容Hash</label
+              ><input
+                id="productionPipelineHash"
+                type="text"
+                aria-label="实际Pipeline内容Hash"
+                autocomplete="off"
+                value=""
+              />
+            </div>
+            <button id="readProductionPlan" type="button">读取服务端编译制品与计划</button>
+            <div id="productionPlan" data-output></div>
+            <div class="grid">
+              <label for="productionArtifactId">真实工程平台Artifact ID</label
+              ><input
+                id="productionArtifactId"
+                type="text"
+                aria-label="真实工程平台Artifact ID"
+                autocomplete="off"
+                value=""
+              /><label for="productionEnvironment">明确部署环境</label
+              ><input
+                id="productionEnvironment"
+                type="text"
+                aria-label="明确部署环境"
+                autocomplete="off"
+                value=""
+              /><label for="productionPrepareKey">本次提案幂等键</label
+              ><input
+                id="productionPrepareKey"
+                type="text"
+                aria-label="本次提案幂等键"
+                autocomplete="off"
+                value=""
+              />
+            </div>
+            <div class="actions">
+              <button id="prepareProduction" type="button">作者登记实际制品准入提案</button
+              ><button id="listProduction" type="button">作者读取准入列表</button>
+            </div>
+            <div id="productionList" data-output></div>
+          </fieldset>
+          <fieldset>
+            <legend>影响范围、完整回归与独立批准</legend>
+            <label for="productionAdmissionId">实际Admission/Proposal ID</label
+            ><input
+              id="productionAdmissionId"
+              type="text"
+              aria-label="实际Admission/Proposal ID"
+              autocomplete="off"
+              value=""
+            />
+            <div class="actions">
+              <button id="readProduction" type="button">作者读取提案与影响证据</button
+              ><button id="reviewerReadProduction" type="button">Reviewer读取提案</button
+              ><button id="verifyProduction" type="button">作者重新验证实际平台回归</button>
+            </div>
+            <div class="grid">
+              <label for="productionCheckId">实际当前PASSED Check ID</label
+              ><input
+                id="productionCheckId"
+                type="text"
+                aria-label="实际当前PASSED Check ID"
+                autocomplete="off"
+                value=""
+              /><label for="productionReceiptTtl">批准收据有效秒数</label
+              ><input
+                id="productionReceiptTtl"
+                type="number"
+                aria-label="批准收据有效秒数"
+                autocomplete="off"
+                value="900"
+                min="30"
+                max="900"
+                step="1"
+              />
+            </div>
+            <button id="approveProduction" type="button">独立Reviewer复检并签发准入收据</button>
+            <div id="productionAdmission" data-output></div>
+            <p class="callout">
+              批准仅覆盖固定模型、制品、基线与完整义务。收据Hash不是离线部署许可；实际发布还需平台在线一次性核验和基线CAS。
+            </p>
+          </fieldset>
+          <fieldset>
+            <legend>在线验票 · 独立部署平台身份</legend>
+            <p class="muted">
+              只调用受控消费收据API，不在AWE执行部署或回滚。可从当前实际批准收据填入，或粘贴平台持有的真实请求，不伪造制品或基线。
+            </p>
+            <button id="fillProductionConsume" type="button">从当前真实收据填入平台请求</button
+            ><label for="productionConsumeDocument"
+              >平台Consume规范JSON（receiptId/receiptHash/artifactHash/pipelineReleaseId/pipelineContentHash/environment/baselineRevision/idempotencyKey）</label
+            ><textarea
+              id="productionConsumeDocument"
+              aria-label="平台Consume规范JSON（receiptId/receiptHash/artifactHash/pipelineReleaseId/pipelineContentHash/environment/baselineRevision/idempotencyKey）"
+              rows="10"
+            ></textarea
+            ><button id="consumeProduction" type="button">平台在线核验并一次性消费收据</button>
+            <div id="productionConsumption" data-output></div>
+          </fieldset>
+          <fieldset>
+            <legend>实际部署观测与逻辑Dataset物化</legend>
+            <p class="muted">
+              平台已在AWE外完成实际部署后再提交deploymentRef。CONSUMED不等于DEPLOYED，更不等于逻辑Dataset已可用；只有真实输出与来源复检通过才能登记物化。
+            </p>
+            <div class="grid">
+              <label for="productionConsumptionId">实际Consumption ID</label
+              ><input
+                id="productionConsumptionId"
+                type="text"
+                aria-label="实际Consumption ID"
+                autocomplete="off"
+                value=""
+              /><label for="productionDeploymentRef">实际部署引用deploymentRef</label
+              ><input
+                id="productionDeploymentRef"
+                type="text"
+                aria-label="实际部署引用deploymentRef"
+                autocomplete="off"
+                value=""
+              /><label for="productionRealizationKey">本次物化观测幂等键</label
+              ><input
+                id="productionRealizationKey"
+                type="text"
+                aria-label="本次物化观测幂等键"
+                autocomplete="off"
+                value=""
+              />
+            </div>
+            <button id="observeProductionRealization" type="button">
+              平台请求实际部署与物化观测</button
+            ><label for="productionDatasetId">实际Dataset Release ID</label
+            ><input
+              id="productionDatasetId"
+              type="text"
+              aria-label="实际Dataset Release ID"
+              autocomplete="off"
+              value=""
+            /><button id="listProductionRealizations" type="button">
+              作者读取Dataset实际物化记录
+            </button>
+            <div id="productionRealization" data-output></div>
+          </fieldset>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,5 +1,6 @@
 package ai.awe.registry.authoring;
 
+import ai.awe.kernel.contract.*;
 import ai.awe.kernel.identity.EntityRef;
 import ai.awe.kernel.model.ActionDefinition;
 import ai.awe.kernel.model.AweDefinition;
@@ -7,9 +8,13 @@ import ai.awe.kernel.model.ContractDefinition;
 import ai.awe.kernel.model.EvidenceAssertion;
 import ai.awe.kernel.model.FunctionDefinition;
 import ai.awe.kernel.model.LinkType;
+import ai.awe.kernel.model.ObjectType;
 import ai.awe.kernel.model.SemanticModel;
 import ai.awe.registry.audit.ModelCheckLog;
 import ai.awe.registry.model.DatasetExtractProfile;
+import ai.awe.registry.model.DatasetReadProfile;
+import ai.awe.registry.model.LogicalDatasetBindings;
+import ai.awe.registry.model.MetricQueryProfile;
 import ai.awe.registry.model.ModelCompatibility;
 import ai.awe.registry.model.ModelValidation;
 import ai.awe.registry.model.PhysicalContractChecks;
@@ -20,6 +25,7 @@ import ai.awe.registry.support.JsonDocuments;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Instant;
 import java.util.*;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,6 +38,7 @@ public class ModelRegistry {
     private final ModelValidation validator;
     private final SourceService sources;
     private final ModelCheckLog checkLog;
+    private final ObjectProvider<LogicalDatasetBindings> realizations;
     private final TypedModels typed = new TypedModels();
     private final ModelCompatibility compatibility = new ModelCompatibility();
     private final PhysicalContractChecks physical = new PhysicalContractChecks();
@@ -41,12 +48,14 @@ public class ModelRegistry {
             JsonDocuments json,
             ModelValidation validator,
             SourceService sources,
-            ModelCheckLog checkLog) {
+            ModelCheckLog checkLog,
+            ObjectProvider<LogicalDatasetBindings> realizations) {
         this.db = db;
         this.json = json;
         this.validator = validator;
         this.sources = sources;
         this.checkLog = checkLog;
+        this.realizations = realizations;
     }
 
     public List<Map<String, Object>> domains() {
@@ -146,7 +155,7 @@ public class ModelRegistry {
                 id,
                 "SUBMITTED",
                 actor,
-                Map.of("schemaVersion", 2));
+                Map.of("schemaVersion", spec.path("schemaVersion").asInt()));
         return draft(id);
     }
 
@@ -273,7 +282,7 @@ public class ModelRegistry {
                         json.write(
                                 Map.of(
                                         "schemaVersion",
-                                        2,
+                                        spec.path("schemaVersion").asInt(),
                                         "domain",
                                         current.get("domain"),
                                         "entityId",
@@ -292,7 +301,7 @@ public class ModelRegistry {
         UUID release = UUID.randomUUID();
         String hash = json.sha256(document);
         db.update(
-                "INSERT INTO awe_release(id,draft_id,domain,entity_id,entity_type,version,content_hash,spec,published_by,schema_version,canonical_document) VALUES(?,?,?,?,?,?,?,?::jsonb,?,2,?::jsonb)",
+                "INSERT INTO awe_release(id,draft_id,domain,entity_id,entity_type,version,content_hash,spec,published_by,schema_version,canonical_document) VALUES(?,?,?,?,?,?,?,?::jsonb,?,?,?::jsonb)",
                 release,
                 id,
                 current.get("domain"),
@@ -302,6 +311,7 @@ public class ModelRegistry {
                 hash,
                 json.canonical(spec),
                 actor,
+                spec.path("schemaVersion").asInt(),
                 json.canonical(document));
         for (var ref : refs.values()) {
             var target = target(ref);
@@ -341,7 +351,13 @@ public class ModelRegistry {
                 id,
                 "PUBLISHED",
                 actor,
-                Map.of("version", version, "contentHash", hash, "schemaVersion", 2));
+                Map.of(
+                        "version",
+                        version,
+                        "contentHash",
+                        hash,
+                        "schemaVersion",
+                        spec.path("schemaVersion").asInt()));
         return release(release);
     }
 
@@ -407,7 +423,7 @@ public class ModelRegistry {
         db.queryForList("SELECT pg_advisory_xact_lock(hashtextextended(?,0))", "verify:" + id);
         var release = release(id);
         var spec = (JsonNode) release.get("spec");
-        if (!Integer.valueOf(2).equals(release.get("schema_version")))
+        if (!Set.of(2, 3).contains(release.get("schema_version")))
             return Map.of(
                     "status",
                     "LEGACY_UNVERIFIED",
@@ -419,7 +435,10 @@ public class ModelRegistry {
                     gaps());
         var model = typed.decode((String) release.get("entity_type"), spec);
         var checks = sourceChecks(spec, model, actor);
-        String status = checks.isEmpty() ? "NOT_APPLICABLE" : "VERIFIED";
+        String status =
+                unmaterialized(model, spec, 0)
+                        ? "UNMATERIALIZED"
+                        : checks.isEmpty() ? "NOT_APPLICABLE" : "VERIFIED";
         for (var check : checks) {
             boolean verified = "VERIFIED".equals(check.get("status"));
             if (!verified) {
@@ -532,13 +551,17 @@ public class ModelRegistry {
     /** 将类型内引用、显式依赖和能力断言统一锁定到已发布版本，禁止隐式采用 latest。 */
     private Map<String, EntityRef> checkReferences(AweDefinition model, JsonNode spec) {
         var refs = new LinkedHashMap<String, EntityRef>();
-        for (var ref : typed.references(model)) addRef(refs, ref);
+        for (var ref : typed.references(model.getClass().getSimpleName(), spec)) addRef(refs, ref);
         for (JsonNode ref : spec.path("dependsOn"))
             addRef(refs, new EntityRef(text(ref, "id"), text(ref, "modelVersion")));
         if (model instanceof FunctionDefinition f) {
             for (String ref : f.requiredAssertions()) addRef(refs, assertionRef(ref));
             // 执行 Profile 的返回 Schema 是正式版本依赖，必须进入发布 Hash 与依赖清单。
             if (DatasetExtractProfile.matches(f))
+                addRef(refs, DatasetExtractProfile.parseResultRef(f.resultSchemaRef()));
+            if (DatasetReadProfile.matches(f))
+                addRef(refs, DatasetReadProfile.parseResultRef(f.resultSchemaRef()));
+            if (MetricQueryProfile.matches(f))
                 addRef(refs, DatasetExtractProfile.parseResultRef(f.resultSchemaRef()));
         }
         if (model instanceof ActionDefinition a)
@@ -552,11 +575,32 @@ public class ModelRegistry {
         if (model instanceof SemanticModel.Dataset m) {
             requireTarget(m.subjectType(), "ObjectType");
             m.dimensions().forEach(this::requireDimension);
+            if (spec.path("schemaVersion").asInt() == 3) {
+                var facet = typed.datasetContract(spec);
+                requireTarget(facet.rowSchema(), "ObjectType");
+                var schema =
+                        (ObjectType)
+                                typed.decode(
+                                        "ObjectType",
+                                        json.parse((String) target(facet.rowSchema()).get("spec")));
+                if (schema.family() != ObjectType.Family.DATASET
+                        || !schema.identityKeys().equals(m.grain().keys()))
+                    throw new IllegalArgumentException(
+                            "Dataset row Schema must match its explicit grain");
+                DatasetExtractProfile.validateSubject(
+                        schema,
+                        (ObjectType)
+                                typed.decode(
+                                        "ObjectType",
+                                        json.parse((String) target(m.subjectType()).get("spec"))));
+            }
         }
         if (model instanceof SemanticModel.Metric m) {
             requireTarget(m.subjectType(), "ObjectType");
             requireTarget(m.sourceDataset(), "Dataset");
             m.allowedDimensions().forEach(this::requireDimension);
+            if (spec.path("schemaVersion").asInt() == 3)
+                validateMetricFacet(m, typed.metricContract(spec));
         }
         if (model instanceof SemanticModel.Feature m) {
             requireTarget(m.subjectType(), "ObjectType");
@@ -589,10 +633,42 @@ public class ModelRegistry {
                                 typed.decode(
                                         "ObjectType", json.parse((String) subject.get("spec"))));
             }
+            if (DatasetReadProfile.matches(f)) {
+                requireTarget(f.ownerType(), "Dataset");
+                EntityRef resultRef = DatasetReadProfile.parseResultRef(f.resultSchemaRef());
+                requireTarget(resultRef, "ObjectType");
+                var ownerSpec = json.parse((String) target(f.ownerType()).get("spec"));
+                var dataset = (SemanticModel.Dataset) typed.decode("Dataset", ownerSpec);
+                var rowSchema =
+                        (ObjectType)
+                                typed.decode(
+                                        "ObjectType",
+                                        json.parse((String) target(resultRef).get("spec")));
+                DatasetReadProfile.validate(f, dataset, rowSchema, ownerSpec);
+                DatasetExtractProfile.validateSubject(
+                        rowSchema,
+                        (ObjectType)
+                                typed.decode(
+                                        "ObjectType",
+                                        json.parse(
+                                                (String)
+                                                        target(dataset.subjectType())
+                                                                .get("spec"))));
+            }
+            if (MetricQueryProfile.matches(f)) {
+                requireTarget(f.ownerType(), "Metric");
+                var ownerSpec = json.parse((String) target(f.ownerType()).get("spec"));
+                MetricQueryProfile.validate(
+                        f, (SemanticModel.Metric) typed.decode("Metric", ownerSpec), ownerSpec);
+            }
         }
         if (model instanceof ActionDefinition a)
             for (String ref : a.postconditionAssertions())
                 requireTarget(assertionRef(ref), "EvidenceAssertion");
+        if (model instanceof ObjectType object
+                && object.family() == ObjectType.Family.PIPELINE
+                && spec.path("schemaVersion").asInt() == 3)
+            validatePipelineFacet(typed.pipelineContract(spec));
         return refs;
     }
 
@@ -603,6 +679,318 @@ public class ModelRegistry {
                 .equals(json.parse((String) row.get("spec")).path("model").path("family").asText()))
             throw new IllegalArgumentException(
                     "Dimension reference must target an ObjectType DIMENSION: " + ref.id());
+    }
+
+    private record ReadSource(SemanticModel.Dataset dataset, ObjectType schema) {}
+
+    /** 正式计算只能从注册读取签名获得字段，不能借普通 Function 字符串注入计算。 */
+    private Map<String, ReadSource> declaredSources(List<MetricContract.Source> declarations) {
+        var result = new LinkedHashMap<String, ReadSource>();
+        for (var source : declarations) {
+            requireTarget(source.readFunction(), "FunctionDefinition");
+            var function =
+                    (FunctionDefinition)
+                            typed.decode(
+                                    "FunctionDefinition",
+                                    json.parse((String) target(source.readFunction()).get("spec")));
+            if (!DatasetExtractProfile.matches(function) && !DatasetReadProfile.matches(function))
+                throw new IllegalArgumentException(
+                        "Semantic source requires a registered read Function");
+            requireTarget(function.ownerType(), "Dataset");
+            var datasetSpec = json.parse((String) target(function.ownerType()).get("spec"));
+            var dataset = (SemanticModel.Dataset) typed.decode("Dataset", datasetSpec);
+            var schemaRef = DatasetExtractProfile.parseResultRef(function.resultSchemaRef());
+            requireTarget(schemaRef, "ObjectType");
+            var schema =
+                    (ObjectType)
+                            typed.decode(
+                                    "ObjectType",
+                                    json.parse((String) target(schemaRef).get("spec")));
+            if (DatasetExtractProfile.matches(function))
+                DatasetExtractProfile.validate(function, dataset, schema, datasetSpec);
+            else DatasetReadProfile.validate(function, dataset, schema, datasetSpec);
+            result.put(source.alias(), new ReadSource(dataset, schema));
+        }
+        return result;
+    }
+
+    private void validateMetricFacet(SemanticModel.Metric metric, MetricContract contract) {
+        var sources = declaredSources(contract.sources());
+        if (!sources.get(contract.sources().getFirst().alias())
+                .dataset()
+                .ref()
+                .equals(metric.sourceDataset()))
+            throw new IllegalArgumentException(
+                    "Metric primary source must equal its formal sourceDataset");
+        var schemas = new LinkedHashMap<String, ObjectType>();
+        sources.forEach((alias, source) -> schemas.put(alias, source.schema()));
+        SemanticPlanTypes.validate(contract, schemas);
+        validateJoins(contract.plan(), sources);
+        var kinds = new HashSet<RelationalIR.AggregateKind>();
+        var arithmetic = new HashSet<RelationalIR.ArithmeticOp>();
+        collectOperations(contract.plan(), kinds, arithmetic);
+        boolean compatible =
+                switch (metric.aggregation().kind()) {
+                    case COUNT ->
+                            kinds.contains(RelationalIR.AggregateKind.COUNT)
+                                    || kinds.contains(RelationalIR.AggregateKind.COUNT_ROWS);
+                    case COUNT_DISTINCT ->
+                            kinds.contains(RelationalIR.AggregateKind.COUNT_DISTINCT);
+                    case SUM -> kinds.contains(RelationalIR.AggregateKind.SUM);
+                    case AVG -> kinds.contains(RelationalIR.AggregateKind.AVG);
+                    case RATIO -> arithmetic.contains(RelationalIR.ArithmeticOp.DIVIDE);
+                    case CUSTOM -> !kinds.isEmpty() || !arithmetic.isEmpty();
+                    case LAST -> false;
+                };
+        if (!compatible)
+            throw new IllegalArgumentException(
+                    "Metric aggregation kind is not implemented by its formal plan");
+    }
+
+    private void validatePipelineFacet(PipelineContract contract) {
+        var sources = declaredSources(contract.sources());
+        var schemas = new LinkedHashMap<String, ObjectType>();
+        sources.forEach((alias, source) -> schemas.put(alias, source.schema()));
+        var subjects = new HashSet<EntityRef>();
+        sources.values().forEach(s -> subjects.add(s.dataset().ref()));
+        for (var target : contract.targets()) {
+            requireTarget(target.dataset(), "Dataset");
+            requireTarget(target.rowSchema(), "ObjectType");
+            var targetSpec = json.parse((String) target(target.dataset()).get("spec"));
+            var dataset = (SemanticModel.Dataset) typed.decode("Dataset", targetSpec);
+            var schema =
+                    (ObjectType)
+                            typed.decode(
+                                    "ObjectType",
+                                    json.parse((String) target(target.rowSchema()).get("spec")));
+            if (schema.family() != ObjectType.Family.DATASET
+                    || !schema.identityKeys().equals(dataset.grain().keys()))
+                throw new IllegalArgumentException(
+                        "Pipeline output Dataset/Schema grain is inconsistent");
+            if (targetSpec.path("schemaVersion").asInt() == 3
+                    && !typed.datasetContract(targetSpec).rowSchema().equals(target.rowSchema()))
+                throw new IllegalArgumentException(
+                        "Pipeline target must use the Dataset declared row Schema");
+            var output =
+                    new SemanticPlanTypes(schemas, MetricContract.ZeroDivisionPolicy.NULL)
+                            .analyze(target.plan());
+            if (!output.keySet()
+                    .equals(
+                            new HashSet<>(
+                                    schema.properties().stream()
+                                            .map(ObjectType.Property::name)
+                                            .toList())))
+                throw new IllegalArgumentException(
+                        "Pipeline plan output names differ from target Schema");
+            for (var property : schema.properties()) {
+                var actual = output.get(property.name());
+                if (actual.type() != property.type() || property.required() && actual.nullable())
+                    throw new IllegalArgumentException(
+                            "Pipeline plan output type/nullability differs from target Schema");
+            }
+            validateJoins(target.plan(), sources);
+            subjects.add(target.dataset());
+        }
+        for (var ref : contract.requiredContracts()) {
+            requireTarget(ref, "ContractDefinition");
+            var validation =
+                    (ContractDefinition)
+                            typed.decode(
+                                    "ContractDefinition",
+                                    json.parse((String) target(ref).get("spec")));
+            if (!subjects.contains(validation.subject()))
+                throw new IllegalArgumentException(
+                        "Pipeline validation contract is outside its exact input/output scope");
+            if (validation.obligations().stream()
+                    .noneMatch(
+                            o -> o.at() == ContractDefinition.Enforcement.EXECUTE && o.blocking()))
+                throw new IllegalArgumentException(
+                        "Pipeline requires real blocking EXECUTE obligations, not only publication declarations");
+        }
+    }
+
+    private void validateJoins(RelationalIR.Node node, Map<String, ReadSource> sources) {
+        switch (node) {
+            case RelationalIR.Scan ignored -> {}
+            case RelationalIR.Filter filter -> validateJoins(filter.input(), sources);
+            case RelationalIR.Project project -> validateJoins(project.input(), sources);
+            case RelationalIR.Aggregate aggregate -> validateJoins(aggregate.input(), sources);
+            case RelationalIR.SetOperation set -> {
+                validateJoins(set.left(), sources);
+                validateJoins(set.right(), sources);
+            }
+            case RelationalIR.Join join -> {
+                requireTarget(join.link(), "LinkType");
+                var link =
+                        (LinkType)
+                                typed.decode(
+                                        "LinkType",
+                                        json.parse((String) target(join.link()).get("spec")));
+                if (!link.certified()
+                        || !Set.of(
+                                        RelationContract.Cardinality.ONE_TO_ONE,
+                                        RelationContract.Cardinality.MANY_TO_ONE)
+                                .contains(link.cardinality())
+                        || !Set.of(
+                                        RelationContract.TemporalPolicy.TIME_INDEPENDENT,
+                                        RelationContract.TemporalPolicy.SAME_SNAPSHOT)
+                                .contains(link.temporalPolicy())
+                        || !"columns.equal.v1".equals(link.identityMappingRef()))
+                    throw new IllegalArgumentException(
+                            "Join requires a certified bounded equality mapping with supported cardinality/time semantics");
+                var rightFields = new LinkedHashSet<String>();
+                var leftFields = new LinkedHashSet<String>();
+                String leftAlias = null, rightAlias = null;
+                for (var key : join.keys()) {
+                    String[] left = key.leftField().split("\\."),
+                            right = key.rightField().split("\\.");
+                    if (left.length != 2
+                            || right.length != 2
+                            || !RelationalIR.sources(join.left()).contains(left[0])
+                            || !RelationalIR.sources(join.right()).contains(right[0]))
+                        throw new IllegalArgumentException(
+                                "Join keys require exact source-qualified fields on the correct side");
+                    if (leftAlias != null && !leftAlias.equals(left[0])
+                            || rightAlias != null && !rightAlias.equals(right[0]))
+                        throw new IllegalArgumentException(
+                                "One Link cannot silently combine unrelated source mappings");
+                    leftAlias = left[0];
+                    rightAlias = right[0];
+                    rightFields.add(right[1]);
+                    leftFields.add(left[1]);
+                }
+                var leftSource = sources.get(leftAlias);
+                var rightSource = sources.get(rightAlias);
+                if (leftSource == null
+                        || rightSource == null
+                        || !link.fromType().equals(leftSource.dataset().ref())
+                        || !link.toType().equals(rightSource.dataset().ref()))
+                    throw new IllegalArgumentException(
+                            "Join Link endpoints differ from exact source Datasets");
+                if (!rightFields.equals(new LinkedHashSet<>(rightSource.dataset().grain().keys())))
+                    throw new IllegalArgumentException(
+                            "Many-to-one join keys must cover the complete right Dataset grain");
+                if (!keyPreservingScan(join.right()))
+                    throw new IllegalArgumentException(
+                            "Join right-side primary-key proof currently supports only scans and filters");
+                if (link.cardinality() == RelationContract.Cardinality.ONE_TO_ONE
+                        && (!leftFields.equals(
+                                        new LinkedHashSet<>(leftSource.dataset().grain().keys()))
+                                || !keyPreservingScan(join.left())))
+                    throw new IllegalArgumentException(
+                            "One-to-one join requires complete keys on both scan/filter inputs");
+                validateJoins(join.left(), sources);
+                validateJoins(join.right(), sources);
+            }
+        }
+    }
+
+    private boolean keyPreservingScan(RelationalIR.Node node) {
+        return node instanceof RelationalIR.Scan
+                || node instanceof RelationalIR.Filter filter && keyPreservingScan(filter.input());
+    }
+
+    private void collectOperations(
+            Object value,
+            Set<RelationalIR.AggregateKind> kinds,
+            Set<RelationalIR.ArithmeticOp> arithmetic) {
+        if (value instanceof RelationalIR.Measure measure) kinds.add(measure.kind());
+        if (value instanceof RelationalIR.Arithmetic expression)
+            arithmetic.add(expression.operation());
+        if (value instanceof Collection<?> list) {
+            list.forEach(item -> collectOperations(item, kinds, arithmetic));
+            return;
+        }
+        if (value != null && value.getClass().isRecord())
+            for (var component : value.getClass().getRecordComponents())
+                try {
+                    Object child = component.getAccessor().invoke(value);
+                    if (child instanceof RelationalIR.Node
+                            || child instanceof RelationalIR.Expr
+                            || child instanceof RelationalIR.Predicate
+                            || child instanceof Collection<?>)
+                        collectOperations(child, kinds, arithmetic);
+                } catch (ReflectiveOperationException ex) {
+                    throw new IllegalStateException(ex);
+                }
+    }
+
+    private boolean logicalTarget(AweDefinition definition, JsonNode spec) {
+        return definition instanceof SemanticModel.Dataset
+                && spec.path("schemaVersion").asInt() == 3
+                && typed.datasetContract(spec).mode() == DatasetContract.Mode.LOGICAL_TARGET;
+    }
+
+    private Optional<JsonNode> effectiveBinding(EntityRef dataset, JsonNode spec) {
+        var resolver = realizations.getIfAvailable();
+        if (resolver == null) return Optional.empty();
+        var binding = resolver.binding(dataset);
+        if (binding.isEmpty()) return binding;
+        var value = binding.get();
+        var fields = new HashSet<String>();
+        value.fieldNames().forEachRemaining(fields::add);
+        if (!value.isObject()
+                || !fields.equals(
+                        Set.of("sourceSystem", "externalRef", "fingerprint", "timeFields"))
+                || !value.path("sourceSystem").isTextual()
+                || !value.path("externalRef").isTextual()
+                || !value.path("fingerprint").isTextual()
+                || !value.path("fingerprint").asText().matches("[a-f0-9]{64}")
+                || !value.path("timeFields").isObject())
+            throw new IllegalArgumentException(
+                    "Trusted realization returned an unsupported physical binding");
+        var model = (SemanticModel.Dataset) typed.decode("Dataset", spec);
+        var roles = new HashSet<String>();
+        value.path("timeFields").fieldNames().forEachRemaining(roles::add);
+        var facet = typed.datasetContract(spec);
+        Set<String> expected =
+                facet.readMode() == DatasetContract.ReadMode.STATIC_SNAPSHOT
+                        ? Set.of()
+                        : model.time().roles().stream()
+                                .map(Enum::name)
+                                .collect(java.util.stream.Collectors.toSet());
+        if (!roles.equals(expected))
+            throw new IllegalArgumentException(
+                    "Realization time-role mapping differs from the immutable Dataset definition");
+        for (var entry : value.path("timeFields").properties())
+            if (!entry.getValue().isTextual())
+                throw new IllegalArgumentException(
+                        "Realization time mappings must be explicit columns");
+        return binding;
+    }
+
+    private boolean unmaterialized(AweDefinition model, JsonNode spec, int depth) {
+        if (depth > 32)
+            throw new IllegalArgumentException("Materialization scope exceeds the supported bound");
+        if (logicalTarget(model, spec))
+            return effectiveBinding(((SemanticModel.Dataset) model).ref(), spec).isEmpty();
+        if (model instanceof FunctionDefinition f
+                && (DatasetReadProfile.matches(f) || MetricQueryProfile.matches(f))) {
+            var owner = target(f.ownerType());
+            var ownerSpec = json.parse((String) owner.get("spec"));
+            return unmaterialized(
+                    typed.decode((String) owner.get("entity_type"), ownerSpec),
+                    ownerSpec,
+                    depth + 1);
+        }
+        if (spec.path("schemaVersion").asInt() == 3
+                && (model instanceof SemanticModel.Metric
+                        || model instanceof ObjectType object
+                                && object.family() == ObjectType.Family.PIPELINE)) {
+            var declarations =
+                    model instanceof SemanticModel.Metric
+                            ? typed.metricContract(spec).sources()
+                            : typed.pipelineContract(spec).sources();
+            for (var declaration : declarations) {
+                var source = target(declaration.readFunction());
+                var sourceSpec = json.parse((String) source.get("spec"));
+                if (unmaterialized(
+                        typed.decode((String) source.get("entity_type"), sourceSpec),
+                        sourceSpec,
+                        depth + 1)) return true;
+            }
+        }
+        return false;
     }
 
     /** 证据快照只能属于被声明模型的实际实现链，不能借用任意依赖的成功观测。 */
@@ -625,13 +1013,17 @@ public class ModelRegistry {
                             snapshot,
                             UUID.fromString(id));
             if (count != null && count > 0) return true;
-            if (!Integer.valueOf(2).equals(row.get("schema_version"))) continue;
-            var value =
-                    typed.decode(
-                            (String) row.get("entity_type"), json.parse((String) row.get("spec")));
+            if (!Set.of(2, 3).contains(row.get("schema_version"))) continue;
+            var rowSpec = json.parse((String) row.get("spec"));
+            var value = typed.decode((String) row.get("entity_type"), rowSpec);
             EntityRef implementation = null;
-            if (value instanceof SemanticModel.Metric metric)
-                implementation = metric.sourceDataset();
+            if (value instanceof SemanticModel.Metric metric) {
+                if (rowSpec.path("schemaVersion").asInt() == 3)
+                    typed.metricContract(rowSpec)
+                            .sources()
+                            .forEach(source -> pending.add(target(source.readFunction())));
+                else implementation = metric.sourceDataset();
+            }
             if (value instanceof SemanticModel.Feature feature)
                 implementation = feature.sourceDataset();
             if (value instanceof ContractDefinition contract) implementation = contract.subject();
@@ -659,7 +1051,7 @@ public class ModelRegistry {
 
     private void requireTarget(EntityRef ref, String... types) {
         var row = target(ref);
-        if (!Integer.valueOf(2).equals(row.get("schema_version"))
+        if (!Set.of(2, 3).contains(row.get("schema_version"))
                 || !Arrays.asList(types).contains(row.get("entity_type")))
             throw new IllegalArgumentException(
                     "Wrong or legacy dependency family for "
@@ -695,6 +1087,14 @@ public class ModelRegistry {
                                     && obligation.at() == ContractDefinition.Enforcement.PUBLISH;
                     supported |=
                             RuntimeRules.DATA_CHECKS.contains(obligation.ruleId())
+                                    && obligation.at() == ContractDefinition.Enforcement.EXECUTE;
+                    supported |=
+                            Set.of(
+                                                    "check.pipeline.output.schema",
+                                                    "check.pipeline.output.grain",
+                                                    "check.pipeline.result.equivalence",
+                                                    "check.pipeline.consumer.regression")
+                                            .contains(obligation.ruleId())
                                     && obligation.at() == ContractDefinition.Enforcement.EXECUTE;
                     if (!supported)
                         throw new IllegalArgumentException(
@@ -747,6 +1147,41 @@ public class ModelRegistry {
             throw new IllegalArgumentException(
                     "Source implementation scope exceeds supported depth");
         var checks = new ArrayList<Map<String, Object>>();
+        if (logicalTarget(model, spec)) {
+            var effective = effectiveBinding(((SemanticModel.Dataset) model).ref(), spec);
+            if (effective.isEmpty()) return checks;
+            var physicalSpec = ((com.fasterxml.jackson.databind.node.ObjectNode) spec).deepCopy();
+            physicalSpec.putArray("bindings").add(effective.get());
+            checkBindings(physicalSpec, spec, model, actor, true, checks);
+            return checks;
+        }
+        if (spec.path("schemaVersion").asInt() == 3
+                && (model instanceof SemanticModel.Metric
+                        || model instanceof ObjectType object
+                                && object.family() == ObjectType.Family.PIPELINE)) {
+            checkBindings(spec, model, actor, true, checks);
+            List<MetricContract.Source> declarations =
+                    model instanceof SemanticModel.Metric
+                            ? typed.metricContract(spec).sources()
+                            : typed.pipelineContract(spec).sources();
+            for (var declaration : declarations) {
+                var row = target(declaration.readFunction());
+                var sourceSpec = json.parse((String) row.get("spec"));
+                var sourceModel = typed.decode((String) row.get("entity_type"), sourceSpec);
+                var nested = sourceChecks(sourceSpec, sourceModel, actor, depth + 1);
+                if (nested.isEmpty() && !unmaterialized(sourceModel, sourceSpec, depth + 1))
+                    throw new IllegalArgumentException(
+                            "Executable plan input is not an observed source");
+                for (var entry : nested) {
+                    var check = new LinkedHashMap<String, Object>(entry);
+                    check.put("direct", false);
+                    check.put("sourceAlias", declaration.alias());
+                    checkLog.append(model, spec, check, actor);
+                    checks.add(check);
+                }
+            }
+            return checks;
+        }
         if (model instanceof SemanticModel.Dataset && spec.path("bindings").isEmpty())
             throw new IllegalArgumentException(
                     "Dataset publication requires an observed authoritative source binding");
@@ -755,8 +1190,10 @@ public class ModelRegistry {
         if (model instanceof SemanticModel.Metric m) source = m.sourceDataset();
         if (model instanceof SemanticModel.Feature f) source = f.sourceDataset();
         // 仅已注册的取数 Profile 继承 Dataset 的真实来源 Gate，普通 Function 仍只是声明。
-        if (model instanceof FunctionDefinition f && DatasetExtractProfile.matches(f))
-            source = f.ownerType();
+        if (model instanceof FunctionDefinition f
+                && (DatasetExtractProfile.matches(f)
+                        || DatasetReadProfile.matches(f)
+                        || MetricQueryProfile.matches(f))) source = f.ownerType();
         if (model instanceof ContractDefinition c
                 && c.obligations().stream()
                         .anyMatch(
@@ -767,7 +1204,7 @@ public class ModelRegistry {
             var targetSpec = json.parse((String) target.get("spec"));
             var sourceModel = typed.decode((String) target.get("entity_type"), targetSpec);
             var nested = sourceChecks(targetSpec, sourceModel, actor, depth + 1);
-            if (nested.isEmpty())
+            if (nested.isEmpty() && !unmaterialized(sourceModel, targetSpec, depth + 1))
                 throw new IllegalArgumentException(
                         "Source consistency subject has no checkable source binding");
             for (var check : nested) {
@@ -807,6 +1244,16 @@ public class ModelRegistry {
             String actor,
             boolean direct,
             List<Map<String, Object>> checks) {
+        checkBindings(spec, spec, model, actor, direct, checks);
+    }
+
+    private void checkBindings(
+            JsonNode spec,
+            JsonNode evidenceSpec,
+            AweDefinition model,
+            String actor,
+            boolean direct,
+            List<Map<String, Object>> checks) {
         for (JsonNode binding : spec.path("bindings")) {
             // 先取得真实来源观测，再比较指纹和模型契约；未配置、不可达或漂移都不能宣告成功。
             var observation =
@@ -825,13 +1272,27 @@ public class ModelRegistry {
             check.put("limitations", observation.limitations());
             check.put("direct", direct);
             if ("VERIFIED".equals(observation.status())) {
-                var errors = physical.errors(model, spec, binding, observation.metadata());
+                var errors =
+                        new ArrayList<>(
+                                physical.errors(model, spec, binding, observation.metadata()));
+                if (model instanceof SemanticModel.Dataset
+                        && spec.path("schemaVersion").asInt() == 3) {
+                    var row = target(typed.datasetContract(spec).rowSchema());
+                    var rowSpec = json.parse((String) row.get("spec"));
+                    errors.addAll(
+                            physical.errors(
+                                    typed.decode("ObjectType", rowSpec),
+                                    rowSpec,
+                                    binding,
+                                    observation.metadata()));
+                }
                 if (!errors.isEmpty()) {
                     check.put("status", "CONTRACT_MISMATCH");
                     check.put("errors", errors);
                 }
             }
-            checkLog.append(model, spec, check, actor);
+            if (spec != evidenceSpec) check.put("realizationBindingHash", json.sha256(binding));
+            checkLog.append(model, evidenceSpec, check, actor);
             checks.add(check);
         }
     }

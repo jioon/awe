@@ -18,9 +18,10 @@ public record Grain(List<String> keys, GrainKind kind) {
         Objects.requireNonNull(keys);
         Objects.requireNonNull(kind);
         keys = List.copyOf(keys);
-        if (keys.isEmpty()
+        if ((keys.isEmpty() && kind != GrainKind.AGGREGATE)
                 || keys.stream().anyMatch(String::isBlank)
                 || Set.copyOf(keys).size() != keys.size())
-            throw new IllegalArgumentException("Grain keys must be nonempty, unique and nonblank");
+            throw new IllegalArgumentException(
+                    "Grain keys must be unique and nonblank; only scalar aggregates have empty tuple grain");
     }
 }

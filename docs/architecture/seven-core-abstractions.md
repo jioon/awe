@@ -31,13 +31,13 @@ F0/F1a 建立基础契约与 PostgreSQL Registry；七类抽象随后进入 **Ja
 这七类定义 AWE 元架构的演进边界，不意味业务数仓团队需要学习七类对象并逐一填写。
 数仓建模入口继续围绕业务对象、Fact/Dataset、Metric、Dimension、Feature、Pipeline、DataProduct；对象型定义使用 `ObjectType.family`，语义计算使用 `SemanticModel` 的具体分支。维度使用 `ObjectType` 的 `DIMENSION` 家族和 `dimension.<domain>.<name>` ID；语义模型的维度引用必须解析到正确的已发布家族。
 工作台提供七类文档模板和依赖/来源/校验视图；模板只是填写结构，不会自动确认业务含义或创建通过验证的 Evidence。
-当前模板属于工程管理工具，不能据此要求成熟域用户重新手填全部知识。统一知识库的领域入口应优先采集、映射、审核已有资产，并生成说明与搜索投影。Metric 的完整度量/表达式/过滤语义、取数契约和 Pipeline 输入/输出/实现意图仍需补齐；七类 record 已存在不能替代这些可执行含义。目标边界见 [ADR-015](adr-015-domain-knowledge-and-controlled-consumption.md)。
+当前模板属于工程管理工具，不能据此要求成熟域用户重新手填全部知识。统一知识库的领域入口应优先采集、映射、审核已有资产，并生成说明与搜索投影。v3 facet 已补齐受支持范围的 Metric 度量/表达式/过滤、Dataset 读契约和 Pipeline 输入/输出/加工意图，并进入真实消费与生产准入；七类 record 的存在本身仍不代表所有语义已可执行。当前范围与限制见 [ADR-018](adr-018-executable-capabilities-and-production-admission.md)。
 另须明确不支持的语义类型应失败关闭，不能利用自定义 JSON 片段绕过规则。
 
 ## 本轮验收
 
 Java CI 的正反契约测试覆盖对象身份、关联扇出、DAU 去重聚合、特征历史可用性、Function/Action 区分、Contract 阶段校验、Evidence 盲区与 sealed 家族闭合；PostgreSQL/HTTP 集成测试覆盖同一类型从建模到发布和来源漂移 Gate 的路径。
 
-**当前执行纵切面：** 已发布 Dataset 与 Contract 的精确版本约束真实 PostgreSQL 只读检查；运行证据与缺口保留失败，外部修复后按同一契约重新执行。支持的 EXECUTE 规则见 [ADR-014](adr-014-agent-skills-and-data-verification-loop.md)。Function/Action 的发布声明仍不等于任意能力执行或数仓写入许可。
+**当前执行链路：** 除 ADR-014 的三类只读检查外，M1 的正式 EXTRACT/QUERY_METRIC、类型化计算、知识解析与回归，以及 M2 的真实制品/影响/回归/一次性准入/平台 CAS/物化后再消费已在 PostgreSQL/HTTP 参考平台验证。Function/Action 的任意发布声明不授予执行权。详见 [ADR-018](adr-018-executable-capabilities-and-production-admission.md)。
 
-**下一主要产品门槛：成熟域可信问数/取数、覆盖与阶段归因。** 随后把相同定义扩展到本域新增/变更准入和跨下游回归。F3 的长期生产改进目标保留；不能以 Resolver 演示、Registry 页面或旁路质量循环替代完整链路。
+**下一产品门槛：企业首域接入与业务验收。** 在受支持模型/算子范围内映射真实任务，验证正确答案、澄清和拒绝；接通现有平台的实际消费/发布口，再扩域复制。不能以工程参考、Registry 页面或测试数量替代领域验收。

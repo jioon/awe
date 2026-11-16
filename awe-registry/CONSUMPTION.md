@@ -32,7 +32,7 @@
 ]
 ```
 
-Author/Reviewer Token 不自动拥有消费权，也不能复用为消费 Token。`consumer.purpose` 只是待检查的用途声明。首版服务主体与静态允许清单不代表企业 OIDC/SSO、个人委托或行级策略已完成；只支持无继承子表的普通 PostgreSQL 表，当前不支持分区根、敏感字段、RLS、视图或外部表。
+Author/Reviewer Token 不自动拥有消费权，也不能复用为消费 Token。`consumer.purpose` 只是待检查的用途声明。后续已增加 OIDC/委托和服务端行级条件，配置见 [IDENTITY.md](IDENTITY.md)；这些实现仍不代表企业身份与源端权限已经验收。只支持无继承子表的普通 PostgreSQL 表，当前不支持分区根、敏感字段、RLS、视图或外部表。
 
 ## 从真实资产到发布能力
 
@@ -58,7 +58,7 @@ Function 的 `model` 示例（外层仍是严格 v2 的 `name/definition/ownerTe
 }
 ```
 
-`resultSchemaRef` 指向上述输出行 ObjectType，不是随意字符串或 Dataset 的隐含所有字段。该执行签名明确定义同名列映射，无 Join、表达式、过滤 DSL 或用户脚本。STRING 只支持 TEXT/VARCHAR，CHAR 明确拒绝；业务事件时间物理列须为 TIMESTAMPTZ，范围边界须为微秒精度。无法表达的能力保持不支持。
+`resultSchemaRef` 指向上述输出行 ObjectType，不是随意字符串或 Dataset 的隐含所有字段。该执行签名明确定义同名列映射，不接收调用方 Join、表达式、过滤 DSL 或脚本；服务端可按授权策略强制增加行过滤。STRING 只支持 TEXT/VARCHAR，CHAR 明确拒绝；业务事件时间物理列须为 TIMESTAMPTZ，范围边界须为微秒精度。无法表达的能力保持不支持。
 
 ## 消费接口与工作台
 
@@ -67,7 +67,7 @@ Function 的 `model` 示例（外层仍是严格 v2 的 `name/definition/ownerTe
 | 接口 | 范围 |
 |---|---|
 | `GET /api/capabilities` | 当前策略允许的已注册取数能力及支持的列/用途/预算；发现本身不证明连通或账期就绪 |
-| `POST /api/data-tasks` | 创建一次 DataTask v1 数据操作；只支持明确的 EXTRACT 请求 |
+| `POST /api/data-tasks` | 本页描述 DataTask v1 EXTRACT；同接口也支持 [v2 QUERY_METRIC](CAPABILITIES.md) |
 | `GET /api/data-tasks` | 当前主体仍有权查看的操作摘要 |
 | `GET /api/data-tasks/{id}` | 同主体、当前仍获授权的操作证据及尚未过期的结果 |
 

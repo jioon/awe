@@ -39,6 +39,32 @@ final class DatasetConsumptionIntegrationTest extends DatasetConsumptionTestSupp
     }
 
     @Test
+    void serverRowScopeIsPreparedAndCannotBeOverriddenByExtractionCaller() throws Exception {
+        // 看似 SQL 的条件值仍只是绑定参数；先证明不能扩大到其他用户。
+        String scoped = "consumption-scoped-token";
+        JsonNode empty = ok("POST", "/api/data-tasks", scoped, request(key()));
+        assertEquals("EXTRACTED", empty.path("status").asText(), empty.toString());
+        assertEquals("NO_RECORD", empty.path("result").path("state").asText());
+        db.update(
+                "UPDATE " + TABLE + " SET user_id=? WHERE event_id='at_from'", "user_1' OR '1'='1");
+        JsonNode operation = ok("POST", "/api/data-tasks", scoped, request(key()));
+        assertEquals("EXTRACTED", operation.path("status").asText(), operation.toString());
+        assertEquals(1, operation.path("result").path("rows").size());
+        assertEquals(
+                "at_from", operation.path("result").path("rows").get(0).path("event_id").asText());
+        assertFalse(operation.path("resolved").path("rowScope").isMissingNode());
+        assertEquals(
+                1,
+                ok("GET", "/api/data-tasks/" + operation.path("id").asText(), scoped, null)
+                        .path("result")
+                        .path("rows")
+                        .size());
+        ObjectNode forged = request(key());
+        forged.putObject("rowScope").put("allowAll", true);
+        assertEquals(400, send("POST", "/api/data-tasks", scoped, forged).statusCode());
+    }
+
+    @Test
     void consumesPublishedProjectionWithHalfOpenBoundsAndIndependentSqlReconciliation()
             throws Exception {
         JsonNode operation = ok("POST", "/api/data-tasks", ALICE, request(key()));
