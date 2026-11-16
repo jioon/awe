@@ -174,7 +174,7 @@
           <fieldset>
             <legend>实际部署观测与逻辑Dataset物化</legend>
             <p class="muted">
-              平台已在AWE外完成实际部署后再提交deploymentRef。CONSUMED不等于DEPLOYED，更不等于逻辑Dataset已可用；只有真实输出与来源复检通过才能登记物化。
+              平台已在AWE外完成实际部署后再提交deploymentRef。CONSUMED不等于DEPLOYED，更不等于逻辑Dataset已可用；只有真实输出与来源复检通过才能登记物化。历史PASSED只记录当次证明范围，不是平台当前活动版本仍有效的凭据。
             </p>
             <div class="grid">
               <label for="productionConsumptionId">实际Consumption ID</label
@@ -191,18 +191,32 @@
                 aria-label="实际部署引用deploymentRef"
                 autocomplete="off"
                 value=""
-              /><label for="productionRealizationKey">本次物化观测幂等键</label
+              /><label for="productionRealizationKey"
+                >观测请求键（同次网络重试保留；收到终态自动轮换）</label
               ><input
                 id="productionRealizationKey"
                 type="text"
-                aria-label="本次物化观测幂等键"
+                aria-label="观测请求键（同次网络重试保留；收到终态自动轮换）"
                 autocomplete="off"
                 value=""
               />
             </div>
-            <button id="observeProductionRealization" type="button">
-              平台请求实际部署与物化观测</button
-            ><label for="productionDatasetId">实际Dataset Release ID</label
+            <p class="muted">
+              默认按钮申请新的观测。未取得终态时保留原键重试；明确选择新键会申请另一观测，不会取消旧请求。返回replayed历史报告也会明确标记。
+            </p>
+            <div class="actions">
+              <button id="observeProductionRealization" type="button">发起新的物化观测</button
+              ><button id="newProductionRealizationKey" type="button">
+                明确生成新的观测请求键
+              </button>
+            </div>
+            <div
+              id="productionObservationStatus"
+              data-output
+              role="status"
+              aria-live="polite"
+            ></div>
+            <label for="productionDatasetId">实际Dataset Release ID</label
             ><input
               id="productionDatasetId"
               type="text"

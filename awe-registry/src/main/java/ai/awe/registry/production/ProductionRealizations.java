@@ -30,6 +30,7 @@ public final class ProductionRealizations implements ai.awe.registry.model.Logic
     private final TransactionTemplate transactions;
     private final TypedModels typed = new TypedModels();
     private final PhysicalContractChecks physical = new PhysicalContractChecks();
+    private final ProductionWriteIntents writeIntents;
 
     public ProductionRealizations(
             JdbcTemplate db,
@@ -40,6 +41,7 @@ public final class ProductionRealizations implements ai.awe.registry.model.Logic
             ProductionPlatformGateway gateway,
             PlatformAccess access,
             SourceService sources,
+            ProductionWriteIntents writeIntents,
             PlatformTransactionManager manager) {
         this.db = db;
         this.json = json;
@@ -49,6 +51,7 @@ public final class ProductionRealizations implements ai.awe.registry.model.Logic
         this.gateway = gateway;
         this.access = access;
         this.sources = sources;
+        this.writeIntents = writeIntents;
         transactions = new TransactionTemplate(manager);
     }
 
@@ -114,7 +117,7 @@ public final class ProductionRealizations implements ai.awe.registry.model.Logic
                             json.write(
                                     Map.of(
                                             "protocolVersion",
-                                            1,
+                                            2,
                                             "requestId",
                                             attemptId.toString(),
                                             "consumptionId",
@@ -233,6 +236,7 @@ public final class ProductionRealizations implements ai.awe.registry.model.Logic
         JsonNode finalDeployment = deploymentProof;
         return transactions.execute(
                 tx -> {
+                    writeIntents.lock((String) proposal.get("environment"), physicalKeys);
                     db.queryForList(
                             "SELECT id FROM awe_production_consumption WHERE id=? FOR UPDATE",
                             consumptionId);
@@ -249,8 +253,20 @@ public final class ProductionRealizations implements ai.awe.registry.model.Logic
                         answer.put("replayed", true);
                         return map(answer);
                     }
+                    String storedStatus = finalStatus;
+                    if (storedStatus.equals("PASSED")
+                            && !writeIntents.current(
+                                    (String) proposal.get("environment"),
+                                    consumptionId,
+                                    authorization.path("targetWriteIntents"),
+                                    physicalKeys)) {
+                        storedStatus = "BLOCKED";
+                        limits.add(
+                                "A newer physical-target write intent superseded this observation before registration");
+                        report.put("status", storedStatus);
+                    }
                     var realizationRefs = new ArrayList<Map<String, Object>>();
-                    if (finalStatus.equals("PASSED"))
+                    if (storedStatus.equals("PASSED"))
                         for (var value : verified) {
                             UUID realizationId = UUID.randomUUID();
                             var existing =
@@ -315,7 +331,7 @@ public final class ProductionRealizations implements ai.awe.registry.model.Logic
                             key,
                             requestHash,
                             json.write(physicalKeys),
-                            finalStatus,
+                            storedStatus,
                             json.write(report));
                     return report;
                 });
@@ -337,17 +353,27 @@ public final class ProductionRealizations implements ai.awe.registry.model.Logic
         var base = ((ObjectNode) binding).deepCopy();
         base.remove("fingerprint");
         if (configured.isEmpty() || !configured.get().equals(base)) return Optional.empty();
-        // 一旦新制品取得同物理目标的写许可，先封住旧语义；不等部署回调才发现同 Schema 的语义替换。
-        var intent =
+        var consumptionId = UUID.fromString((String) row.get("consumption_id"));
+        var consumed =
                 db.queryForList(
-                        "SELECT id::text FROM awe_production_consumption WHERE authorization_doc @> ?::jsonb ORDER BY consumed_at DESC,id DESC LIMIT 1",
-                        json.write(Map.of("physicalTargets", List.of(physicalKey(binding)))));
-        if (intent.isEmpty() || !row.get("consumption_id").equals(intent.getFirst().get("id")))
+                        "SELECT authorization_doc::text FROM awe_production_consumption WHERE id=?",
+                        consumptionId);
+        if (consumed.isEmpty()) return Optional.empty();
+        JsonNode authorization = json.parse((String) consumed.getFirst().get("authorization_doc"));
+        if (authorization.path("protocolVersion").asInt() != 2
+                || !targets.environment().equals(authorization.path("environment").asText()))
             return Optional.empty();
+        var scope = ProductionTargetVersions.keys(authorization.path("physicalTargets"));
+        if (!scope.contains(physicalKey(binding))
+                || !writeIntents.current(
+                        targets.environment(),
+                        consumptionId,
+                        authorization.path("targetWriteIntents"),
+                        scope)) return Optional.empty();
         var latest =
                 db.queryForList(
-                        "SELECT status,consumption_id::text,report_doc::text FROM awe_production_realization_attempt WHERE physical_targets @> ?::jsonb ORDER BY observed_at DESC,id DESC LIMIT 1",
-                        json.write(List.of(physicalKey(binding))));
+                        "SELECT status,consumption_id::text,report_doc::text FROM awe_production_realization_attempt WHERE consumption_id=? ORDER BY observed_at DESC,id DESC LIMIT 1",
+                        consumptionId);
         if (latest.isEmpty()
                 || !"PASSED".equals(latest.getFirst().get("status"))
                 || !row.get("consumption_id").equals(latest.getFirst().get("consumption_id")))
@@ -370,6 +396,49 @@ public final class ProductionRealizations implements ai.awe.registry.model.Logic
                             .equals(realized.path("dataset").path("contentHash").asText()))
                 same = true;
         if (!same) return Optional.empty();
+        // 新查询复核平台当前所有者；Schema 指纹及 Registry 的历史 PASSED 不能证明活动语义。
+        try {
+            var proposal =
+                    admissions.proposal(UUID.fromString(authorization.path("proposalId").asText()));
+            var plan =
+                    models.plan(
+                            UUID.fromString((String) proposal.get("pipeline_release_id")),
+                            (String) proposal.get("pipeline_content_hash"));
+            UUID observationId = UUID.randomUUID();
+            var observation =
+                    gateway.realization(
+                            json.parse(
+                                    json.write(
+                                            Map.of(
+                                                    "protocolVersion",
+                                                    2,
+                                                    "requestId",
+                                                    observationId.toString(),
+                                                    "consumptionId",
+                                                    consumptionId.toString(),
+                                                    "deploymentRef",
+                                                    row.get("deployment_ref"),
+                                                    "authorization",
+                                                    authorization))));
+            if (!"RECEIVED".equals(observation.status())) return Optional.empty();
+            validateDeployment(
+                    observation.document(),
+                    observationId,
+                    consumptionId,
+                    (String) row.get("deployment_ref"),
+                    authorization,
+                    plan);
+            JsonNode current = observation.document();
+            if (!row.get("run_ref").equals(current.path("runId").asText())
+                    || !row.get("attempt_ref").equals(current.path("attemptId").asText())
+                    || !writeIntents.current(
+                            targets.environment(),
+                            consumptionId,
+                            authorization.path("targetWriteIntents"),
+                            scope)) return Optional.empty();
+        } catch (IllegalArgumentException | IllegalStateException ex) {
+            return Optional.empty();
+        }
         return Optional.of(binding.deepCopy());
     }
 
@@ -454,8 +523,10 @@ public final class ProductionRealizations implements ai.awe.registry.model.Logic
                 "runId",
                 "attemptId",
                 "completedAt",
+                "targetRevisions",
+                "currentTargets",
                 "outputs");
-        if (ProductionJson.integer(doc, "protocolVersion", 1) != 1
+        if (ProductionJson.integer(doc, "protocolVersion", 2) != 2
                 || !requestId.toString().equals(ProductionJson.text(doc, "requestId", 36))
                 || !consumptionId
                         .toString()
@@ -495,6 +566,36 @@ public final class ProductionRealizations implements ai.awe.registry.model.Logic
             throw new Failure(
                     "BLOCKED",
                     "Deployment did not commit a new active baseline revision through platform CAS");
+        var expectedOutputs = new TreeSet<String>();
+        for (var target : plan.targets())
+            expectedOutputs.add(
+                    target.dataset().get("id")
+                            + ":"
+                            + target.dataset().get("content_hash")
+                            + ":"
+                            + target.contract().targetBindingRef().orElseThrow());
+        var actualOutputs = new TreeSet<String>();
+        if (!doc.path("outputs").isArray() || doc.path("outputs").size() != expectedOutputs.size())
+            throw new Failure("INCONCLUSIVE", "Current deployment output coverage is incomplete");
+        for (JsonNode output : doc.path("outputs")) {
+            ProductionJson.fields(
+                    output, "datasetReleaseId", "datasetContentHash", "targetBindingRef");
+            if (!actualOutputs.add(
+                    ProductionJson.uuid(output, "datasetReleaseId")
+                            + ":"
+                            + ProductionJson.hash(output, "datasetContentHash")
+                            + ":"
+                            + ProductionJson.text(output, "targetBindingRef", 240)))
+                throw new Failure("INCONCLUSIVE", "Duplicate current deployment output");
+        }
+        if (!actualOutputs.equals(expectedOutputs))
+            throw new Failure(
+                    "BLOCKED",
+                    "Current deployment output identity differs from the exact model scope");
+        if (!ProductionTargetVersions.active(doc, authorization))
+            throw new Failure(
+                    "BLOCKED",
+                    "Current physical target ownership or revision differs from the consumed deployment");
         ProductionJson.text(doc, "bindingRevision", 240);
         ProductionJson.text(doc, "runId", 240);
         ProductionJson.text(doc, "attemptId", 120);
