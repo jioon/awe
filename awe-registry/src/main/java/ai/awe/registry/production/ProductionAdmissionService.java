@@ -28,6 +28,7 @@ public final class ProductionAdmissionService {
     private final ProductionObligations obligations;
     private final ProductionPlatformGateway gateway;
     private final PlatformAccess access;
+    private final ProductionWriteIntents writeIntents;
     private final SourceService sources;
     private final TransactionTemplate transactions;
     private final Semaphore observationSlots = new Semaphore(2);
@@ -48,6 +49,7 @@ public final class ProductionAdmissionService {
             ProductionPlatformGateway gateway,
             PlatformAccess access,
             SourceService sources,
+            ProductionWriteIntents writeIntents,
             PlatformTransactionManager manager,
             Environment env) {
         this.db = db;
@@ -60,6 +62,7 @@ public final class ProductionAdmissionService {
         this.gateway = gateway;
         this.access = access;
         this.sources = sources;
+        this.writeIntents = writeIntents;
         transactions = new TransactionTemplate(manager);
         String age = env.getProperty("AWE_PRODUCTION_PROOF_MAX_AGE_SECONDS", "900");
         if (!age.matches("[1-9][0-9]{1,3}")
@@ -170,7 +173,9 @@ public final class ProductionAdmissionService {
                                             "deployment",
                                             response.context().path("baseline"),
                                             "bindingRevision",
-                                            response.context().path("bindingRevision"))));
+                                            response.context().path("bindingRevision"),
+                                            "targetBaselines",
+                                            response.context().path("targetBaselines"))));
             limits.add(
                     "Preparation records actual artifact/baseline observations; no regression or deployment has been certified");
         } catch (Failure ex) {
@@ -408,6 +413,12 @@ public final class ProductionAdmissionService {
                             || !"PASSED".equals(check.get("status")))
                         throw new IllegalStateException(
                                 "The approved check is no longer the latest successful check");
+                    var fixedPlan =
+                            models.plan(
+                                    UUID.fromString((String) proposal.get("pipeline_release_id")),
+                                    (String) proposal.get("pipeline_content_hash"));
+                    writeIntents.lock(
+                            (String) proposal.get("environment"), physicalKeys(fixedPlan));
                     Current current = current(proposal, "CONSUME", UUID.randomUUID());
                     requireUnchanged(current, proposal, check);
                     if (!databaseNow()
@@ -420,7 +431,17 @@ public final class ProductionAdmissionService {
                                 "Production receipt expired during current-scope verification");
                     UUID consumptionId = UUID.randomUUID();
                     var authorization = new LinkedHashMap<String, Object>();
+                    authorization.put("protocolVersion", 2);
                     authorization.put("consumptionId", consumptionId.toString());
+                    authorization.put(
+                            "targetBaselines",
+                            current.observed().context().path("targetBaselines"));
+                    authorization.put(
+                            "targetWriteIntents",
+                            writeIntents.append(
+                                    (String) proposal.get("environment"),
+                                    physicalKeys(current.plan()),
+                                    consumptionId));
                     authorization.put("proposalId", id.toString());
                     authorization.put("receiptId", receiptId.toString());
                     authorization.put("receiptHash", receiptHash);
@@ -443,7 +464,7 @@ public final class ProductionAdmissionService {
                     authorization.put(
                             "requirements",
                             List.of(
-                                    "Platform must CAS the current deployment baseline revision and exact artifact digest",
+                                    "Platform must atomically CAS every physical target revision and monotonic write intent with the exact artifact digest",
                                     "Platform must use consumptionId as the deployment idempotency identity",
                                     "AWE has not performed deployment or accepted the overall business task"));
                     authorization.put(
@@ -574,6 +595,10 @@ public final class ProductionAdmissionService {
                         .equals(((JsonNode) proposal.get("baseline_doc")).path("bindingRevision")))
             throw new Failure(
                     "STALE", "The actual deployed baseline or platform binding revision changed");
+        if (!observed.context()
+                .path("targetBaselines")
+                .equals(((JsonNode) proposal.get("baseline_doc")).path("targetBaselines")))
+            throw new Failure("STALE", "A shared physical target changed after preparation");
         return new Current(plan, impact, suite, required, observed);
     }
 
@@ -593,7 +618,8 @@ public final class ProductionAdmissionService {
                     json.parse(
                             json.write(
                                     Map.ofEntries(
-                                            Map.entry("protocolVersion", 1),
+                                            Map.entry("protocolVersion", 2),
+                                            Map.entry("physicalTargets", physicalKeys(plan)),
                                             Map.entry("requestId", requestId.toString()),
                                             Map.entry("phase", phase),
                                             Map.entry(
@@ -622,10 +648,11 @@ public final class ProductionAdmissionService {
                     "pipelineContentHash",
                     "artifact",
                     "baseline",
+                    "targetBaselines",
                     "inputs",
                     "suite",
                     "regression");
-            if (ProductionJson.integer(doc, "protocolVersion", 1) != 1
+            if (ProductionJson.integer(doc, "protocolVersion", 2) != 2
                     || !requestId.toString().equals(ProductionJson.text(doc, "requestId", 36))
                     || !environment.equals(ProductionJson.text(doc, "environment", 120))
                     || !plan.pipeline()
@@ -640,6 +667,9 @@ public final class ProductionAdmissionService {
             String bindingRevision = ProductionJson.text(doc, "bindingRevision", 240);
             validateArtifact(doc.path("artifact"), artifactId, plan);
             JsonNode baseline = baseline(doc.path("baseline"), plan);
+            JsonNode targetBaselines =
+                    ProductionTargetVersions.baselines(
+                            doc.path("targetBaselines"), physicalKeys(plan));
             JsonNode inputs = inputs(doc.path("inputs"), plan);
             if (!doc.path("suite").equals(json.parse(json.write(suite.descriptor()))))
                 throw new Failure(
@@ -681,6 +711,8 @@ public final class ProductionAdmissionService {
                                             environment,
                                             "baseline",
                                             baseline,
+                                            "targetBaselines",
+                                            targetBaselines,
                                             "inputs",
                                             inputs,
                                             "bindingRevision",
@@ -812,6 +844,7 @@ public final class ProductionAdmissionService {
                 "artifactHash",
                 "environment",
                 "baselineRevision",
+                "targetBaselinesHash",
                 "impactHash",
                 "inputRevisionsHash",
                 "checks");
@@ -852,6 +885,13 @@ public final class ProductionAdmissionService {
                     "INCONCLUSIVE",
                     current,
                     "Regression does not cover the complete required obligation set",
+                    proof);
+        if (!json.sha256(current.observed().context().path("targetBaselines"))
+                .equals(ProductionJson.hash(proof, "targetBaselinesHash")))
+            return report(
+                    "INCONCLUSIVE",
+                    current,
+                    "Regression belongs to different physical target baselines",
                     proof);
         var expected = new HashMap<String, Map<String, Object>>();
         for (var obligation : current.required())
@@ -949,11 +989,27 @@ public final class ProductionAdmissionService {
                 Set.of(UUID.fromString((String) plan.pipeline().get("id"))));
     }
 
+    private List<String> physicalKeys(ProductionModels.Plan plan) {
+        for (var target : plan.targets())
+            targets.require(target.contract().targetBindingRef().orElseThrow());
+        var keys =
+                models.physicalTargets(plan).stream()
+                        .map(k -> k.system() + ":" + k.externalRef())
+                        .sorted()
+                        .toList();
+        if (keys.size() != plan.targets().size())
+            throw new IllegalArgumentException(
+                    "A Pipeline cannot declare multiple outputs for the same physical target");
+        return keys;
+    }
+
     private String configurationHash() {
         return json.sha256(
                 json.parse(
                         json.write(
                                 Map.of(
+                                        "protocolVersion",
+                                        2,
                                         "platform",
                                         gateway.configurationHash(),
                                         "regressionSuites",

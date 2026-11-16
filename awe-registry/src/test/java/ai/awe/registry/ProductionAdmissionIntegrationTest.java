@@ -3,6 +3,7 @@ package ai.awe.registry;
 import static org.junit.jupiter.api.Assertions.*;
 
 import ai.awe.registry.production.ProductionRealizations;
+import ai.awe.registry.production.ProductionWriteIntents;
 import ai.awe.registry.source.postgres.PostgresWarehouse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -45,11 +46,25 @@ final class ProductionAdmissionIntegrationTest extends MetricQueryTestSupport {
                     "takeover",
                     "shared_x",
                     "shared_y",
+                    "late_a",
+                    "late_b",
+                    "callback_a",
+                    "callback_b",
+                    "outside",
+                    "vector_missing",
+                    "vector_wrong",
+                    "vector_deploy",
+                    "atomic",
+                    "atomic_first",
+                    "atomic_second",
+                    "intent_a",
+                    "intent_b",
                     "missing");
     private static SqlBackedProductionPlatform platform;
     @Autowired PostgresWarehouse warehouse;
     @Autowired PlatformTransactionManager transactions;
     @Autowired ProductionRealizations realizations;
+    @Autowired ProductionWriteIntents writeIntents;
     private SourceAssets source;
     private final Map<String, Assets> assets = new HashMap<>();
 
@@ -486,6 +501,11 @@ final class ProductionAdmissionIntegrationTest extends MetricQueryTestSupport {
 
     private JsonNode realize(Approved approved, JsonNode consumed) throws Exception {
         String deployment = platform().deploy(consumed.path("authorization"));
+        return observeRealization(approved, consumed, deployment);
+    }
+
+    private JsonNode observeRealization(Approved approved, JsonNode consumed, String deployment)
+            throws Exception {
         return ok(
                 "POST",
                 "/api/production/admissions/"
@@ -499,6 +519,16 @@ final class ProductionAdmissionIntegrationTest extends MetricQueryTestSupport {
                         deployment,
                         "idempotencyKey",
                         key()));
+    }
+
+    private JsonNode query(JsonNode function) throws Exception {
+        return ok("POST", "/api/data-tasks", CONSUMER, metricRequest(function, key()));
+    }
+
+    private void assertCount(JsonNode function, int expected) throws Exception {
+        JsonNode result = query(function);
+        assertEquals("QUERIED", result.path("status").asText(), result.toString());
+        assertEquals(expected, result.path("result").path("rows").get(0).path("value").asInt());
     }
 
     @Test
@@ -828,6 +858,348 @@ final class ProductionAdmissionIntegrationTest extends MetricQueryTestSupport {
         assertTrue(impact.contains("realization_id"));
     }
 
+    @Test
+    void laterSharedTargetDeploymentRejectsOlderPipelineEvenWhenItsOwnBaselineIsUnchanged()
+            throws Exception {
+        Assets older = assets("late_a");
+        Approved first = approved(older);
+        JsonNode oldConsume = consume(first);
+        Assets newer = publishVersion("late_b", "1.0.0", older.schema(), true);
+        Approved second = approved(newer);
+        JsonNode newConsume = consume(second);
+        assertEquals(2, newConsume.path("authorization").path("protocolVersion").asInt());
+        assertEquals(1, newConsume.path("authorization").path("targetBaselines").size());
+        assertTrue(
+                new java.math.BigInteger(
+                                        newConsume
+                                                .path("authorization")
+                                                .path("targetWriteIntents")
+                                                .get(0)
+                                                .path("intentId")
+                                                .asText())
+                                .compareTo(
+                                        new java.math.BigInteger(
+                                                oldConsume
+                                                        .path("authorization")
+                                                        .path("targetWriteIntents")
+                                                        .get(0)
+                                                        .path("intentId")
+                                                        .asText()))
+                        > 0);
+        String deployment = platform().deploy(newConsume.path("authorization"));
+        JsonNode realizationReport = observeRealization(second, newConsume, deployment);
+        assertEquals(
+                "PASSED", realizationReport.path("status").asText(), realizationReport.toString());
+        JsonNode newerConsumer = consumer(newer, "1.0.0");
+        assertCount(newerConsumer, 2);
+        // 旧发布即使最后才抵达，也不能借自己仍为 0 的 Pipeline baseline 覆盖共享物理表。
+        assertThrows(
+                IllegalStateException.class,
+                () -> platform().deploy(oldConsume.path("authorization")));
+        assertEquals(2, db.queryForObject("SELECT count(*) FROM " + older.table(), Integer.class));
+        assertEquals(
+                deployment,
+                platform().deploy(newConsume.path("authorization")),
+                "the exact accepted consumption is platform-idempotent");
+        ObjectNode reused = newConsume.path("authorization").deepCopy();
+        reused.put("receiptHash", "0".repeat(64));
+        assertThrows(IllegalStateException.class, () -> platform().deploy(reused));
+        assertCount(newerConsumer, 2);
+    }
+
+    @Test
+    void olderCallbackCannotPoisonTheNewSharedTargetOwner() throws Exception {
+        Assets older = assets("callback_a");
+        Approved first = approved(older);
+        JsonNode oldConsume = consume(first);
+        String oldDeployment = platform().deploy(oldConsume.path("authorization"));
+        assertEquals(
+                "PASSED",
+                observeRealization(first, oldConsume, oldDeployment).path("status").asText());
+        Assets newer = publishVersion("callback_b", "1.0.0", older.schema(), true);
+        Approved second = approved(newer);
+        JsonNode newConsume = consume(second);
+        assertEquals("PASSED", realize(second, newConsume).path("status").asText());
+        JsonNode newConsumer = consumer(newer, "1.0.0");
+        assertCount(newConsumer, 2);
+        JsonNode late = observeRealization(first, oldConsume, oldDeployment);
+        assertNotEquals("PASSED", late.path("status").asText(), late.toString());
+        assertTrue(
+                realizations
+                        .effectiveBinding(UUID.fromString(newer.dataset().path("id").asText()))
+                        .isPresent(),
+                "a stale observation is audit history and cannot become the target's active proof");
+        assertCount(newConsumer, 2);
+    }
+
+    @Test
+    void sameSchemaExternalPlatformReplacementWithoutCallbackRevokesCachedProof() throws Exception {
+        Assets original = assets("outside");
+        Approved first = approved(original);
+        JsonNode consumed = consume(first);
+        assertEquals("PASSED", realize(first, consumed).path("status").asText());
+        JsonNode function = consumer(original, "1.0.0");
+        assertCount(function, 4);
+        platform().replaceOutsideAdmission(consumed.path("authorization"));
+        assertEquals(
+                2, db.queryForObject("SELECT count(*) FROM " + original.table(), Integer.class));
+        // Registry 没收到新 callback、Schema 完全不变；查询仍须向可信平台核对当前目标所有者。
+        assertTrue(
+                realizations
+                        .effectiveBinding(UUID.fromString(original.dataset().path("id").asText()))
+                        .isEmpty());
+        JsonNode result = query(function);
+        assertNotEquals("QUERIED", result.path("status").asText(), result.toString());
+        assertTrue(
+                result.path("result").path("rows").isMissingNode()
+                        || result.path("result").path("rows").isEmpty(),
+                result.toString());
+    }
+
+    @Test
+    void incompleteOrWrongPhysicalTargetVectorsCannotPrepareAnAdmission() throws Exception {
+        Assets missing = assets("vector_missing");
+        platform().mutate(response -> response.remove("targetBaselines"));
+        JsonNode absent = proposal(missing);
+        assertNotEquals("PREPARED", absent.path("status").asText(), absent.toString());
+        platform().reset();
+        Assets wrong = assets("vector_wrong");
+        platform()
+                .mutate(
+                        response -> {
+                            JsonNode vector = response.path("targetBaselines");
+                            if (vector.isArray() && !vector.isEmpty())
+                                ((ObjectNode) vector.get(0))
+                                        .put("targetKey", "postgres:production.another_target");
+                        });
+        JsonNode crossed = proposal(wrong);
+        assertNotEquals("PREPARED", crossed.path("status").asText(), crossed.toString());
+    }
+
+    @Test
+    void platformRejectsMissingOrSupersededTargetVectorsBeforeWritingRows() throws Exception {
+        Assets original = assets("vector_deploy");
+        Approved first = approved(original);
+        JsonNode consumed = consume(first);
+        ObjectNode missing = consumed.path("authorization").deepCopy();
+        missing.remove("targetBaselines");
+        assertThrows(IllegalStateException.class, () -> platform().deploy(missing));
+        ObjectNode wrongIntent = consumed.path("authorization").deepCopy();
+        ((ObjectNode) wrongIntent.path("targetWriteIntents").get(0)).put("intentId", "0");
+        assertThrows(IllegalStateException.class, () -> platform().deploy(wrongIntent));
+        assertNull(
+                db.queryForObject("SELECT to_regclass(?)::text", String.class, original.table()));
+        assertEquals("PASSED", realize(first, consumed).path("status").asText());
+    }
+
+    @Test
+    void allTargetCasChecksPrecedeWritesAndSecondTargetFailureRollsBackTheWholeDeployment()
+            throws Exception {
+        Assets first = assets("atomic_first");
+        Assets second = assets("atomic_second");
+        ObjectNode pipelineSpec = first.pipeline().path("spec").deepCopy();
+        ((ObjectNode) pipelineSpec.path("model"))
+                .set("ref", json.parse(json.write(ref("pipeline.production.atomic"))));
+        var contract = (ObjectNode) pipelineSpec.path("pipelineContract");
+        ((com.fasterxml.jackson.databind.node.ArrayNode) contract.path("targets"))
+                .add(
+                        second.pipeline()
+                                .path("spec")
+                                .path("pipelineContract")
+                                .path("targets")
+                                .get(0));
+        ((com.fasterxml.jackson.databind.node.ArrayNode) contract.path("requiredContracts"))
+                .add(json.parse(json.write(ref("contract.production.atomic_second"))));
+        JsonNode pipeline = publish("ObjectType", pipelineSpec);
+        JsonNode artifact =
+                ok(
+                        "GET",
+                        "/api/production/plans/"
+                                + pipeline.path("id").asText()
+                                + "?contentHash="
+                                + pipeline.path("content_hash").asText(),
+                        AUTHOR,
+                        null);
+        platform().register("atomic-artifact", artifact.path("artifact"), first.table(), false);
+        Assets combined =
+                new Assets(
+                        "atomic",
+                        first.dataset(),
+                        first.schema(),
+                        first.contract(),
+                        pipeline,
+                        "atomic-artifact",
+                        first.table());
+        Approved approved = approved(combined);
+        JsonNode consumed = consume(approved);
+        assertEquals(2, consumed.path("authorization").path("targetBaselines").size());
+        ObjectNode wrongSecondBaseline = consumed.path("authorization").deepCopy();
+        ((ObjectNode) wrongSecondBaseline.path("targetBaselines").get(1))
+                .put("revision", "unrelated-revision");
+        assertThrows(IllegalStateException.class, () -> platform().deploy(wrongSecondBaseline));
+        assertNull(db.queryForObject("SELECT to_regclass(?)::text", String.class, first.table()));
+        assertNull(db.queryForObject("SELECT to_regclass(?)::text", String.class, second.table()));
+        // 第二目标真实 INSERT 失败，第一目标写入及全体目标版本必须随事务一起回滚。
+        db.execute(
+                "CREATE TABLE "
+                        + second.table()
+                        + "(user_id TEXT PRIMARY KEY,score BIGINT NOT NULL CONSTRAINT reject_positive CHECK(score<0))");
+        assertThrows(
+                RuntimeException.class, () -> platform().deploy(consumed.path("authorization")));
+        assertNull(db.queryForObject("SELECT to_regclass(?)::text", String.class, first.table()));
+        assertEquals(0, db.queryForObject("SELECT count(*) FROM " + second.table(), Integer.class));
+        db.execute("ALTER TABLE " + second.table() + " DROP CONSTRAINT reject_positive");
+        JsonNode realization = realize(approved, consumed);
+        assertEquals("PASSED", realization.path("status").asText(), realization.toString());
+        assertEquals(2, realization.path("realizations").size());
+        assertEquals(4, db.queryForObject("SELECT count(*) FROM " + first.table(), Integer.class));
+        assertEquals(4, db.queryForObject("SELECT count(*) FROM " + second.table(), Integer.class));
+    }
+
+    @Test
+    void concurrentDifferentPipelinesHaveOneOrderedImmutableIntentOwnerPerEnvironment()
+            throws Exception {
+        Assets a = assets("intent_a");
+        Assets b = publishVersion("intent_b", "1.0.0", a.schema(), true);
+        Approved first = approved(a), second = approved(b);
+        var executor = Executors.newFixedThreadPool(2);
+        var start = new CountDownLatch(1);
+        JsonNode left, right;
+        try {
+            var f =
+                    executor.submit(
+                            () -> {
+                                start.await();
+                                return consume(first);
+                            });
+            var g =
+                    executor.submit(
+                            () -> {
+                                start.await();
+                                return consume(second);
+                            });
+            start.countDown();
+            left = f.get(40, TimeUnit.SECONDS);
+            right = g.get(40, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+        long leftIntent =
+                Long.parseLong(
+                        left.path("authorization")
+                                .path("targetWriteIntents")
+                                .get(0)
+                                .path("intentId")
+                                .asText());
+        long rightIntent =
+                Long.parseLong(
+                        right.path("authorization")
+                                .path("targetWriteIntents")
+                                .get(0)
+                                .path("intentId")
+                                .asText());
+        assertNotEquals(leftIntent, rightIntent);
+        JsonNode newer = leftIntent > rightIntent ? left : right;
+        JsonNode older = leftIntent > rightIntent ? right : left;
+        UUID newerId = UUID.fromString(newer.path("id").asText()),
+                olderId = UUID.fromString(older.path("id").asText());
+        List<String> keys = new ArrayList<>();
+        newer.path("authorization").path("physicalTargets").forEach(k -> keys.add(k.asText()));
+        assertTrue(
+                writeIntents.current(
+                        "test",
+                        newerId,
+                        newer.path("authorization").path("targetWriteIntents"),
+                        keys));
+        assertFalse(
+                writeIntents.current(
+                        "test",
+                        olderId,
+                        older.path("authorization").path("targetWriteIntents"),
+                        keys));
+        // 复用真实 consumption 外键，直接验证底层意图存储的环境隔离；不宣称第二企业环境已接入。
+        JsonNode otherEnvironment =
+                new TransactionTemplate(transactions)
+                        .execute(
+                                tx ->
+                                        writeIntents.append(
+                                                "isolated-test-environment", keys, olderId));
+        assertTrue(
+                writeIntents.current("isolated-test-environment", olderId, otherEnvironment, keys));
+        assertTrue(
+                writeIntents.current(
+                        "test",
+                        newerId,
+                        newer.path("authorization").path("targetWriteIntents"),
+                        keys));
+        assertFalse(writeIntents.current("test", olderId, otherEnvironment, keys));
+        // 用真实追加自然跨过十进制位数边界，防止把 id::text 的字典序当作授权先后。
+        // 每个填充环境仍使用已提交 consumption 外键，不改历史证据，也不设置数据库 sequence。
+        String boundaryEnvironment = "isolated-test-environment";
+        JsonNode boundaryOlder = otherEnvironment;
+        long allocated = Long.parseLong(boundaryOlder.get(0).path("intentId").asText());
+        long boundary = 10;
+        while (boundary <= allocated) boundary *= 10;
+        while (true) {
+            if (allocated == boundary - 1) {
+                String environment = boundaryEnvironment;
+                JsonNode boundaryNewer =
+                        new TransactionTemplate(transactions)
+                                .execute(tx -> writeIntents.append(environment, keys, newerId));
+                long latest = Long.parseLong(boundaryNewer.get(0).path("intentId").asText());
+                assertEquals(
+                        boundary,
+                        latest,
+                        "the fixture must cross a real decimal generation boundary");
+                assertFalse(
+                        writeIntents.current(environment, olderId, boundaryOlder, keys),
+                        "generation "
+                                + allocated
+                                + " must be superseded by numeric generation "
+                                + latest);
+                assertTrue(
+                        writeIntents.current(environment, newerId, boundaryNewer, keys),
+                        "numeric generation "
+                                + latest
+                                + " must win over textually larger "
+                                + allocated);
+                if (boundary >= 100) break;
+                boundary *= 10;
+            }
+            boundaryEnvironment = "intent-boundary-" + UUID.randomUUID();
+            String environment = boundaryEnvironment;
+            boundaryOlder =
+                    new TransactionTemplate(transactions)
+                            .execute(tx -> writeIntents.append(environment, keys, olderId));
+            allocated = Long.parseLong(boundaryOlder.get(0).path("intentId").asText());
+        }
+        long immutableId = Math.max(leftIntent, rightIntent);
+        assertThrows(
+                RuntimeException.class,
+                () ->
+                        db.update(
+                                "UPDATE awe_production_target_intent SET environment='tampered' WHERE id=?",
+                                immutableId));
+        assertThrows(
+                RuntimeException.class,
+                () ->
+                        db.update(
+                                "DELETE FROM awe_production_target_intent WHERE id=?",
+                                immutableId));
+        assertEquals(
+                1,
+                db.queryForObject(
+                        "SELECT count(*) FROM awe_production_target_intent WHERE id=?",
+                        Integer.class,
+                        immutableId));
+        assertTrue(
+                writeIntents.current(
+                        "test",
+                        newerId,
+                        newer.path("authorization").path("targetWriteIntents"),
+                        keys));
+    }
+
     private JsonNode consumer(Assets asset, String version) throws Exception {
         String name = asset.name();
         String functionId = "function.production." + name + "_read";
@@ -972,7 +1344,11 @@ final class ProductionAdmissionIntegrationTest extends MetricQueryTestSupport {
     }
 
     private static String physical(String name) {
-        return name.startsWith("shared_") ? "shared" : name;
+        if (name.startsWith("shared_")) return "shared";
+        if (name.startsWith("late_")) return "late";
+        if (name.startsWith("callback_")) return "callback";
+        if (name.startsWith("intent_")) return "intent";
+        return name;
     }
 
     private static String table(String name) {

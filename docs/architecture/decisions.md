@@ -82,3 +82,7 @@ MCP/API 必须鉴权；数据库/BI/调度服务端重新验权。受限 Link、
 ## ADR-018 可执行能力与生产准入
 
 见 [ADR-018](adr-018-executable-capabilities-and-production-admission.md)：v3 可执行契约、有界 IR、统一消费与改进证据、在线一次性生产准入和版本化物化；复用现有平台执行，保留企业验收边界。
+
+## ADR-019 共享物理目标版本
+
+见 [ADR-019](adr-019-shared-physical-target-versions.md)：完整物理目标 CAS、单调写意图、实时活动实现与旧回调隔离，保留现有平台执行边界。

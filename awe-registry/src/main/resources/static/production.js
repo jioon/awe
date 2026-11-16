@@ -10,6 +10,7 @@
     proposal = null;
   window.addEventListener("awe-identity-cleared", () => {
     proposal = null;
+    resetRealizationIntent();
   });
   function admission(document) {
     proposal = document;
@@ -136,26 +137,143 @@
     if (result.id) $("productionConsumptionId").value = result.id;
     notice("CONSUMED仅表示一次性在线验票；实际部署状态仍以外部平台与后验物化观测为准。");
   });
-  bind("observeProductionRealization", async () =>
-    show(
-      "productionRealization",
-      await platform(
-        "/production/admissions/" + uuid("productionAdmissionId") + "/realizations",
-        "POST",
-        {
-          consumptionId: uuid("productionConsumptionId"),
-          deploymentRef: text("productionDeploymentRef"),
-          idempotencyKey: text("productionRealizationKey"),
-        },
+  let realizationRequest = null;
+  let realizationInFlight = false;
+  let realizationGeneration = 0;
+  function updateRealizationControls() {
+    for (const id of [
+      "newProductionRealizationKey",
+      "productionRealizationKey",
+      "productionConsumptionId",
+      "productionDeploymentRef",
+      "productionAdmissionId",
+    ])
+      $(id).disabled = realizationInFlight;
+    $("observeProductionRealization").textContent = realizationRequest
+      ? "重试同一次观测（保留原请求键）"
+      : "发起新的物化观测";
+  }
+  function resetRealizationIntent() {
+    realizationGeneration++;
+    realizationRequest = null;
+    realizationInFlight = false;
+    $("productionRealizationKey").value = key();
+    $("productionRealization").replaceChildren();
+    updateRealizationControls();
+  }
+  function realizationContext() {
+    return {
+      admissionId: uuid("productionAdmissionId"),
+      body: {
+        consumptionId: uuid("productionConsumptionId"),
+        deploymentRef: text("productionDeploymentRef"),
+        idempotencyKey: text("productionRealizationKey"),
+      },
+    };
+  }
+  function realizationMessage(message, requestKey) {
+    $("productionObservationStatus").replaceChildren(
+      C.el("p", message, "callout warn"),
+      C.el("p", "该报告对应的已提交请求键：" + requestKey, "muted"),
+      C.el(
+        "p",
+        "PASSED仅记录该次观测在其时点与范围内通过，不是此刻平台活动版本或物化绑定仍有效的证明。",
+        "muted",
       ),
-    ),
-  );
-  bind("listProductionRealizations", async () =>
-    show(
-      "productionRealization",
-      await author("/production/datasets/" + uuid("productionDatasetId") + "/realizations"),
-    ),
-  );
+    );
+  }
+  bind("newProductionRealizationKey", () => {
+    if (realizationInFlight) throw Error("请求仍在途，请先等待本次响应。");
+    resetRealizationIntent();
+    $("productionObservationStatus").replaceChildren(
+      C.el(
+        "p",
+        "已明确选择新的观测请求。它不会取消或改写服务端可能已经接受的旧请求；旧报告不作为新观测结果。",
+        "callout",
+      ),
+    );
+    notice("已生成新观测请求键；下一次提交申请新的观测，不是重读旧收据。");
+  });
+  bind("observeProductionRealization", async () => {
+    const context = realizationContext();
+    if (realizationRequest && JSON.stringify(context) !== JSON.stringify(realizationRequest))
+      throw Error(
+        "同一次重试必须保留原提案、Consumption、部署引用和请求键。需要修改范围时，请先明确生成新的观测请求键。",
+      );
+    realizationRequest = realizationRequest || context;
+    const accepted = realizationRequest;
+    const generation = realizationGeneration;
+    realizationInFlight = true;
+    updateRealizationControls();
+    $("productionRealization").replaceChildren();
+    realizationMessage(
+      "请求正在等待服务端报告，尚无本次终态；不会沿用上一份PASSED作为本次结果。",
+      accepted.body.idempotencyKey,
+    );
+    try {
+      const result = await platform(
+        "/production/admissions/" + accepted.admissionId + "/realizations",
+        "POST",
+        accepted.body,
+      );
+      if (generation !== realizationGeneration) return;
+      show("productionRealization", result);
+      const terminal =
+        typeof result.status === "string" &&
+        result.status.length > 0 &&
+        !["RUNNING", "PENDING", "IN_PROGRESS"].includes(result.status);
+      const historical = result.replayed === true;
+      if (terminal) {
+        // 服务端终态是本次收据的结束；即便返回历史报告，下一次点击也必须表达新观测意图。
+        realizationRequest = null;
+        $("productionRealizationKey").value = key();
+        realizationMessage(
+          historical
+            ? "这是历史请求报告（replayed=true），服务端复用了原收据；不能把它当成刚刚重新观测的平台状态。下一次新观测键已轮换。"
+            : "服务端返回本次请求的终态报告，未标记为历史重放。下一次新观测键已轮换；是否实际取得部署证据，以报告状态与限制为准。",
+          accepted.body.idempotencyKey,
+        );
+        notice(
+          historical
+            ? "已显示历史收据；再次提交将使用新键申请新观测。"
+            : "本次请求已取得终态收据；再次提交将申请新观测，PASSED不作实时有效证明。",
+        );
+      } else {
+        realizationMessage(
+          "尚未取得服务端终态；保留原请求键，只能重试同一次请求，不能据此判断物化成功。",
+          accepted.body.idempotencyKey,
+        );
+        notice("观测仍未终态；重试使用同一请求键。");
+      }
+    } catch (error) {
+      if (generation === realizationGeneration) {
+        // 传输失败不证明服务端未接受：保留整个请求上下文，避免重试变成重复的新操作。
+        realizationMessage(
+          "未取得可确认的服务端终态。网络失败时原请求可能已被接受；原请求键和范围保留，重试不会擅自换键。",
+          accepted.body.idempotencyKey,
+        );
+      }
+      throw error;
+    } finally {
+      if (generation === realizationGeneration) {
+        realizationInFlight = false;
+        updateRealizationControls();
+      }
+    }
+  });
+  bind("listProductionRealizations", async () => {
+    const rows = await author(
+      "/production/datasets/" + uuid("productionDatasetId") + "/realizations",
+    );
+    show("productionRealization", rows);
+    $("productionObservationStatus").replaceChildren(
+      C.el(
+        "p",
+        "以下是服务端保存的物化登记记录，不是一次新的平台活动版本复检；不得仅凭历史PASSED推定当前仍有效。",
+        "callout warn",
+      ),
+    );
+  });
   $("productionPrepareKey").value = key();
-  $("productionRealizationKey").value = key();
+  resetRealizationIntent();
 })();

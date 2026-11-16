@@ -20,6 +20,7 @@ public final class ProductionTargets {
                         ? configuredEnvironment
                         : "";
         var parsed = new TreeMap<String, JsonNode>();
+        Set<String> ambiguous = ambiguousPostgresSources(env, json);
         try {
             String raw = env.getProperty("AWE_PRODUCTION_TARGET_BINDINGS", "");
             if (!raw.isBlank()) {
@@ -48,7 +49,8 @@ public final class ProductionTargets {
                                 || !role.getValue().asText().matches("[A-Za-z_][A-Za-z0-9_]{0,62}"))
                             throw new IllegalArgumentException();
                     }
-                    parsed.put(entry.getKey(), value.deepCopy());
+                    if (!system.equals("postgres") || !ambiguous.contains("postgres:" + external))
+                        parsed.put(entry.getKey(), value.deepCopy());
                 }
             }
         } catch (RuntimeException ex) {
@@ -82,6 +84,26 @@ public final class ProductionTargets {
                         () ->
                                 new IllegalStateException(
                                         "NOT_CONFIGURED: registered production target binding is missing or invalid"));
+    }
+
+    /** PostgreSQL 同一连接下一个 relation 只能有一个生产资产标识，防止别名绕过共享目标保护。 */
+    private static Set<String> ambiguousPostgresSources(Environment env, JsonDocuments json) {
+        var byRelation = new HashMap<String, Set<String>>();
+        try {
+            String raw = env.getProperty("AWE_WAREHOUSE_ASSET_BINDINGS", "");
+            if (raw.isBlank()) return Set.of();
+            JsonNode mapping = json.object(raw);
+            for (var entry : mapping.properties())
+                if (entry.getKey().startsWith("postgres:") && entry.getValue().isTextual())
+                    byRelation
+                            .computeIfAbsent(entry.getValue().asText(), key -> new HashSet<>())
+                            .add(entry.getKey());
+        } catch (IllegalArgumentException invalid) {
+            return Set.of();
+        }
+        var ambiguous = new HashSet<String>();
+        for (var entries : byRelation.values()) if (entries.size() > 1) ambiguous.addAll(entries);
+        return Set.copyOf(ambiguous);
     }
 
     private static String text(JsonNode node, String key) {

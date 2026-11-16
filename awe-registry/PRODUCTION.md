@@ -26,13 +26,13 @@ AWE 校验加工意图、制品、影响和回归，并提供在线一次性部�
 
 ## 管理员配置
 
-所有地址、资产映射和可信实现由部署方配置，不从用户请求接收。Registry 使用 V8 追加表；历史批准、消费和观测不可变。
+所有地址、资产映射和可信实现由部署方配置，不从用户请求接收。Registry 使用 V8/V9 追加表；历史批准、消费和观测不可变。
 
 | 环境变量 | 格式与用途 |
 |---|---|
 | `AWE_PRODUCTION_ENVIRONMENT` | 本实例固定物理环境，如 prod；缺失不授予许可 |
 | `AWE_PRODUCTION_PLATFORM_URL`、`AWE_PRODUCTION_PLATFORM_TOKEN` | 固定可信平台网关；HTTPS，回环测试可 HTTP |
-| `AWE_PRODUCTION_POLICY_REVISION` | 平台政策/执行实现变更时递增，旧证明随配置变化失效 |
+| `AWE_PRODUCTION_POLICY_REVISION` | 平台政策/执行实现变更时递增；本轮生产网关协议升级为 v2，旧准备上下文不可直接消费 |
 | `AWE_PRODUCTION_TARGET_BINDINGS` | 对象：targetBindingRef → `{sourceSystem,externalRef,timeFields}`，不预填 fingerprint |
 | `AWE_PRODUCTION_REGRESSION_SUITES` | 数组：`{pipelineId,suiteId,version,contentHash,independentCheckers:[checkerRef]}` |
 | `AWE_PRODUCTION_CALLERS` | 数组：`{principal,token,pipelineIds:[id],environments:[environment]}` |
@@ -40,7 +40,7 @@ AWE 校验加工意图、制品、影响和回归，并提供在线一次性部�
 
 生产平台 Token 与作者、审核者、消费者 Token 必须分开。平台授权精确限定 Pipeline 和环境；请求自报角色/环境不增加权限。来源系统仍须配置对应 metadata/warehouse 映射；没有真实连接时返回 NOT_CONFIGURED。
 
-目标映射不等于物化成功。`externalRef` 必须是来源适配器的管理员资产映射，timeFields 指明真实时间列；STATIC_SNAPSHOT 使用 `{}`。系统独立观测真实部署表的 fingerprint/列/主键/时间后才记录实现。
+同一 PostgreSQL relation 的多个外部别名会使相关生产目标映射不可用，须先统一规范资产标识。Hive/BI 适配器也须在真实规范资源上做共享目标 CAS。目标映射不等于物化成功。`externalRef` 必须是来源适配器的管理员资产映射，timeFields 指明真实时间列；STATIC_SNAPSHOT 使用 `{}`。系统独立观测真实部署表的 fingerprint/列/主键/时间后才记录实现。
 
 ## 在线准入协议
 
@@ -50,7 +50,7 @@ AWE 校验加工意图、制品、影响和回归，并提供在线一次性部�
 | 2 回归 | 作者 `POST /api/production/admissions/{id}/verify`，body `{}` | 服务端完整影响、义务和注册套件；可信网关观测真实候选/参考 |
 | 3 批准 | 独立审核者 `POST .../{id}/approve` | checkId、expiresInSeconds（30—900）；当前最新完整 PASSED 才能批准 |
 | 4 消费 | 平台 `POST .../{id}/consume` | receiptId、receiptHash、artifactHash、pipelineReleaseId、pipelineContentHash、environment、baselineRevision、idempotencyKey |
-| 5 部署 | 外部平台自己的部署接口 | 仅消费返回的 authorization，按 expectedBaselineRevision 做原子 CAS，记录 consumptionId；AWE 不执行此步骤 |
+| 5 部署 | 外部平台自己的部署接口 | 仅消费返回的 authorization，原子比较全部 targetBaselines 和 targetWriteIntents，保留 expectedBaselineRevision 的 Pipeline 检查，记录 consumptionId；AWE 不执行此步骤 |
 | 6 观测 | 平台 `POST .../{id}/realizations` | consumptionId、deploymentRef、idempotencyKey；AWE 向可信网关获取实际部署事实并独立观测输出 |
 | 7 使用 | 消费者按正式读能力查询 | 固定 Dataset/Schema Release 与实现证明，不改写原逻辑发布 Hash |
 
@@ -62,10 +62,10 @@ AWE 校验加工意图、制品、影响和回归，并提供在线一次性部�
 
 AWE 使用固定网关的两个端点，不接受调用方提供的“测试通过”对象：
 
-- `POST /admissions/observe`：请求含 protocolVersion、requestId、phase、pipeline、artifactId、expectedArtifactHash、environment、impactHash、suite、obligations。phase 为 PREPARE/VERIFY/APPROVE/CONSUME。响应须精确绑定请求/模型/环境，提供 bindingRevision、真实 artifact（artifactId/version/contentHash/mediaType/content）、baseline、inputs、suite、regression。mediaType 为 `application/vnd.awe.pipeline-plan+json`，content 必须与规范制品等同。
-- `POST /admissions/realizations`：请求含 protocolVersion、requestId、consumptionId、deploymentRef、authorization。响应包含同一收据/制品/模型/环境、previousRevision/revision/activeRevision、runId/attemptId/completedAt、DEPLOYED 状态与精确输出集合。部署必须产生新的活动基线，输出覆盖每个确切 Dataset/Hash/targetBindingRef。
+- `POST /admissions/observe`：请求含 protocolVersion、requestId、phase、pipeline、artifactId、expectedArtifactHash、environment、physicalTargets、impactHash、suite、obligations，protocolVersion 必须为 2。phase 为 PREPARE/VERIFY/APPROVE/CONSUME。响应须精确绑定请求/模型/环境，提供 bindingRevision、真实 artifact（artifactId/version/contentHash/mediaType/content）、baseline、targetBaselines、inputs、suite、regression。mediaType 为 `application/vnd.awe.pipeline-plan+json`，content 必须与规范制品等同。
+- `POST /admissions/realizations`：请求含 protocolVersion、requestId、consumptionId、deploymentRef、authorization。响应 protocolVersion=2，包含同一收据/制品/模型/环境、previousRevision/revision/activeRevision、targetRevisions/currentTargets、runId/attemptId/completedAt、DEPLOYED 状态与精确输出集合。部署必须产生新的活动基线，输出覆盖每个确切 Dataset/Hash/targetBindingRef。
 
-回归证明绑定 contextHash、impactHash、suite、真实运行/输入快照和时间；每个服务端派生 obligation 必须有注册独立 checker 的测量/比较记录。只声明 PASSED、删除失败项、借用其他模型或不同输入窗口的证明均无效。输入和输出 Schema、必需 Contract、候选与独立参考、全部受影响发布和共享资产分别形成义务；准入按匹配范围检查覆盖。
+回归证明绑定 contextHash、impactHash、suite、targetBaselinesHash、真实运行/输入快照和时间；每个服务端派生 obligation 必须有注册独立 checker 的测量/比较记录。只声明 PASSED、删除失败项、借用其他模型或不同输入窗口的证明均无效。输入和输出 Schema、必需 Contract、候选与独立参考、全部受影响发布和共享资产分别形成义务；准入按匹配范围检查覆盖。
 
 字段级权威协议见 [ProductionAdmissionService](src/main/java/ai/awe/registry/production/ProductionAdmissionService.java)、[ProductionObligations](src/main/java/ai/awe/registry/production/ProductionObligations.java)、[ProductionRealizations](src/main/java/ai/awe/registry/production/ProductionRealizations.java)。[SQL 参考平台](src/test/java/ai/awe/registry/SqlBackedProductionPlatform.java) 实际执行规范计划、独立 SQL 比较、CAS 建表部署；测试中的成功来自真实计算，而非预置响应。企业适配可沿用协议接入 Hive/Spark/调度/质量平台。
 
@@ -76,3 +76,26 @@ AWE 使用固定网关的两个端点，不接受调用方提供的“测试通�
 AWE 与外部部署平台之间没有跨系统事务。平台必须在真正发布入口强制在线消费和 CAS，保持同一 consumption 的幂等提交，并提供可信活动版本观测。若消费后部署失败/取消，保持旧证明封禁，由平台恢复受审版本并重新完成准入/观测；不得删除消费记录或手改证据恢复绿灯。生产只读运行身份、DDL/写权限及旁路入口同样需在平台落实。
 
 物化观测验证部署绑定与元数据，不自动证明全部历史行正确或所有业务效果达成。参考测试、企业连通、真实业务验收、强制切换及容量/容灾验证分别记录。复杂加工、历史恢复与 F6 自主操作仍需独立能力，不能凭本收据泛化授权。
+
+## 共享物理目标向量与活动实现（协议 v2）
+
+Pipeline 的 revision 不能保护另一 Pipeline 也会写入的表。每个 physicalTargets 标识格式为 `sourceSystem:externalRef`，采用管理员规范资产命名空间，环境独立隔离；部署方必须保证物理写目标按环境分离，跨环境共享的真实写目标必须共用治理权威，不能靠不同标签绕过同一资源 CAS。基线、授权和观测必须覆盖全部目标，拒绝子集、重复项或额外目标。
+
+```json
+{
+  "targetBaselines": [
+    {"targetKey": "postgres:activity.summary", "revision": "revision-17", "consumptionId": "<UUID>", "intentId": "17"}
+  ],
+  "targetWriteIntents": [
+    {"targetKey": "postgres:activity.summary", "intentId": "23"}
+  ]
+}
+```
+
+首次未管理目标可用 revision=`0`、consumptionId=`""`、intentId=`0`。revision 是平台的不透明版本；intentId 是 AWE 追加生成的正整数字符串（不可用 JS 浮点数解析）。消费授权新增 protocolVersion=2、targetBaselines、targetWriteIntents。平台在任何写入前原子比较整个基线向量，拒绝不递增的写意图；幂等重试必须匹配完整同一授权，不能借同消费 ID 换载荷或重写旧版本。
+
+部署的 `targetRevisions` 每项为 `{targetKey,previousRevision,revision,consumptionId,intentId}`；每次 `/admissions/realizations` 响应另提供从当前真实状态读取的 `currentTargets`，每项为 `{targetKey,revision,consumptionId,intentId}`。当前集合须与该次部署的新版本和所有者完全一致，不能回显历史缓存。AWE 每次获取逻辑实现证明都实时复核，不把历史 PASSED 当成永久许可。
+
+数据、所有目标状态和幂等提交应在同一个原子事务或等效提交机制中生效；不能提供该能力时须明确拒绝。对平台未登记的直接数据覆写仍须依靠源端写权限与独立验证，版本向量无法凭空发现未观测的变化。
+
+旧生产记录保留只读，不能凭旧协议收据延续当前写入/查询证明。升级需重新准备/回归/批准/消费；模型 Release/Hash 不改写。完整取舍见 [ADR-019](../docs/architecture/adr-019-shared-physical-target-versions.md)。
