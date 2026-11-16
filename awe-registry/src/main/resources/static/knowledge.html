@@ -194,11 +194,12 @@
               <label for="feedbackReviewNote">作者归因说明</label
               ><textarea id="feedbackReviewNote" aria-label="作者归因说明"></textarea
               ><button id="reviewFeedback" type="button">作者登记归因</button
-              ><label for="feedbackReplayId">同范围实际通过的回归Replay ID</label
+              ><label for="feedbackReplayId"
+                >同范围数据结果回归Replay ID（不接收DATA_OUTCOME）</label
               ><input
                 id="feedbackReplayId"
                 type="text"
-                aria-label="同范围实际通过的回归Replay ID"
+                aria-label="同范围数据结果回归Replay ID（不接收DATA_OUTCOME）"
                 autocomplete="off"
                 value=""
               /><label for="feedbackClosureNote">Reviewer技术闭合说明</label
@@ -211,44 +212,109 @@
             </fieldset>
           </details>
           <fieldset>
+            <legend>真实操作结局观测 · 消费者</legend>
+            <p class="callout">
+              此接口会按完整DataTask实际尝试一次操作，记录真实的新观测，不是静态校验，也不返回行载荷。请求必须使用现有正式能力、范围、用途与预算；不要填写虚构模型或伪造成功结果。
+            </p>
+            <label for="regressionObservationRequest"
+              >完整现有DataTask JSON（从实际消费请求复制，不含Token）</label
+            ><textarea
+              id="regressionObservationRequest"
+              aria-label="完整现有DataTask JSON（从实际消费请求复制，不含Token）"
+              rows="12"
+            ></textarea
+            ><label for="regressionObservationKey"
+              >观测幂等键（网络重试保留同payload；取得终态后自动换键）</label
+            ><input
+              id="regressionObservationKey"
+              type="text"
+              aria-label="观测幂等键（网络重试保留同payload；取得终态后自动换键）"
+              autocomplete="off"
+              value=""
+            />
+            <div class="actions">
+              <button id="observeRegressionRequest" type="button">发起新的实际操作结局观测</button
+              ><button id="newRegressionObservationKey" type="button">
+                明确生成新的观测请求键
+              </button>
+            </div>
+            <div id="regressionObservationRequestStatus" data-output></div>
+            <label for="regressionOutcomeObservationId">实际操作结局Observation ID</label
+            ><input
+              id="regressionOutcomeObservationId"
+              type="text"
+              aria-label="实际操作结局Observation ID"
+              autocomplete="off"
+              value=""
+            />
+            <div class="actions">
+              <button id="readRegressionObservation" type="button">
+                读取已保存观测（不重新执行）</button
+              ><button id="useObservedOutcome" type="button">将实际outcome填入待审期望</button>
+            </div>
+            <div id="regressionOutcomeObservation" data-output></div>
+            <p class="muted">
+              填入观测不等于判断该行为正确；仍需独立参考依据、Reviewer批准和新的实际回放。成功取数状态不能伪装成DATA_OUTCOME。
+            </p>
+          </fieldset>
+          <fieldset>
             <legend>受审参考与实际回归</legend>
             <p class="muted">
-              参考必须提供真实依据与外部证据，不默认以错误操作自身Hash充当真值。批准参考与执行回放分别保存。
+              参考必须提供真实依据与外部证据，不默认以错误操作自身Hash充当真值。旧格式继续按原Hash验证；读取案例不改写历史参考。
             </p>
-            <div class="grid">
-              <label for="regressionObservationId">实际锚点观测ID</label
-              ><input
-                id="regressionObservationId"
-                type="text"
-                aria-label="实际锚点观测ID"
-                autocomplete="off"
-                value=""
-              /><label for="regressionExpectedState">参考结果状态</label
+            <label for="regressionObservationId">实际锚点观测ID</label
+            ><input
+              id="regressionObservationId"
+              type="text"
+              aria-label="实际锚点观测ID"
+              autocomplete="off"
+              value=""
+            /><label for="regressionExpectationType">本次新建参考的期望类型</label
+            ><select id="regressionExpectationType" aria-label="参考期望类型">
+              <option value="LEGACY">旧格式兼容（数据结果 / 解析参考）</option>
+              <option value="DATA_RESULT">DATA_RESULT · 精确数据结果</option>
+              <option value="DATA_OUTCOME">DATA_OUTCOME · 正确拒绝 / 未就绪行为</option>
+            </select>
+            <div id="regressionResultExpectation">
+              <label for="regressionExpectedState">参考结果状态</label
               ><select id="regressionExpectedState" aria-label="参考结果状态">
-                <option value="RECORDS">RECORDS</option>
-                <option value="NO_RECORD">NO_RECORD</option>
-                <option value="ZERO">ZERO</option>
-                <option value="NULL">NULL</option>
-                <option value="RESOLVED">RESOLVED</option>
-                <option value="AMBIGUOUS">AMBIGUOUS</option>
-                <option value="UNRESOLVED">UNRESOLVED</option></select
-              ><label for="regressionFingerprint">实际参考Fingerprint（SHA256）</label
+                <option>RECORDS</option>
+                <option>NO_RECORD</option>
+                <option>ZERO</option>
+                <option>NULL</option>
+                <option>RESOLVED</option>
+                <option>AMBIGUOUS</option>
+                <option>UNRESOLVED</option></select
+              ><label for="regressionFingerprint">实际参考Fingerprint（64位SHA256，不能为空）</label
               ><input
                 id="regressionFingerprint"
                 type="text"
-                aria-label="实际参考Fingerprint（SHA256）"
-                autocomplete="off"
-                value=""
-              /><label for="regressionEvidenceRef">独立参考证据引用</label
-              ><input
-                id="regressionEvidenceRef"
-                type="text"
-                aria-label="独立参考证据引用"
+                aria-label="实际参考Fingerprint（64位SHA256，不能为空）"
                 autocomplete="off"
                 value=""
               />
             </div>
-            <label for="regressionBasis">参考依据说明</label
+            <div id="regressionOutcomeExpectationFields" class="hidden">
+              <label for="regressionOutcomeExpectation"
+                >待独立审定的outcome
+                JSON（status/httpStatus/decision/failureStage/noDataReturned）</label
+              ><textarea
+                id="regressionOutcomeExpectation"
+                aria-label="待独立审定的outcome JSON（status/httpStatus/decision/failureStage/noDataReturned）"
+                rows="10"
+              ></textarea>
+              <p class="callout warn">
+                DATA_OUTCOME通过仅证明拒绝或未就绪行为符合受审期望，不证明数据结果正确，不能用于数据反馈技术闭合。不得将成功状态或有数据返回的行为伪装为正确拒绝。
+              </p>
+            </div>
+            <label for="regressionEvidenceRef">独立参考证据引用</label
+            ><input
+              id="regressionEvidenceRef"
+              type="text"
+              aria-label="独立参考证据引用"
+              autocomplete="off"
+              value=""
+            /><label for="regressionBasis">参考依据说明</label
             ><textarea id="regressionBasis" aria-label="参考依据说明"></textarea
             ><button id="proposeRegression" type="button">消费者提出参考案例</button>
             <div class="grid">
@@ -271,8 +337,9 @@
             <div class="actions">
               <button id="readRegression" type="button">消费者读取案例</button
               ><button id="approveRegression" type="button">Reviewer独立批准参考</button
-              ><button id="replayRegression" type="button">消费者按同义务实际回放</button>
+              ><button id="replayRegression" type="button">消费者按受审义务实际回放</button>
             </div>
+            <div id="regressionCaseTypeReport" data-output></div>
             <label for="regressionReplayId">实际Replay ID</label
             ><input
               id="regressionReplayId"
@@ -282,6 +349,104 @@
               value=""
             /><button id="readRegressionReplay" type="button">读取实际回归证据</button>
             <div id="regressionReport" data-output></div>
+          </fieldset>
+          <fieldset>
+            <legend>受审义务迁移：旧反馈 → 修订模型 → 新参考</legend>
+            <p class="callout">
+              旧scope不会自动放宽。迁移仅支持DATA_RESULT，DATA_OUTCOME不能用于数据修复替代验收。新版本操作由目标case的真实锚点关联；服务端只允许同主体、政策、同Function实体的新版本，并保持业务请求、输出签名和原期望。旧case、错误结果与失败证据均保留。
+            </p>
+            <div class="grid">
+              <label for="migrationFeedbackId">实际旧Feedback ID</label
+              ><input
+                id="migrationFeedbackId"
+                type="text"
+                aria-label="实际旧Feedback ID"
+                autocomplete="off"
+                value=""
+              /><label for="migrationFromCaseId">实际原参考fromCaseId</label
+              ><input
+                id="migrationFromCaseId"
+                type="text"
+                aria-label="实际原参考fromCaseId"
+                autocomplete="off"
+                value=""
+              /><label for="migrationToCaseId">实际修订后参考toCaseId</label
+              ><input
+                id="migrationToCaseId"
+                type="text"
+                aria-label="实际修订后参考toCaseId"
+                autocomplete="off"
+                value=""
+              />
+            </div>
+            <label for="migrationReason">版本修订与义务迁移理由</label
+            ><textarea id="migrationReason" aria-label="版本修订与义务迁移理由"></textarea
+            ><label for="migrationEvidenceRef">迁移的独立参考证据引用</label
+            ><input
+              id="migrationEvidenceRef"
+              type="text"
+              aria-label="迁移的独立参考证据引用"
+              autocomplete="off"
+              value=""
+            /><label for="migrationRequestKey"
+              >本提案幂等键（同payload重试；另提案须明确新键）</label
+            ><input
+              id="migrationRequestKey"
+              type="text"
+              aria-label="本提案幂等键（同payload重试；另提案须明确新键）"
+              autocomplete="off"
+              value=""
+            />
+            <div class="actions">
+              <button id="inspectMigrationCases" type="button">消费者核对两份实际参考</button
+              ><button id="proposeMigration" type="button">消费者提交受审迁移提案</button
+              ><button id="newMigrationRequestKey" type="button">明确建立另一迁移提案键</button
+              ><button id="listMigrations" type="button">消费者读取该反馈的迁移列表</button>
+            </div>
+            <div id="migrationCases" data-output></div>
+            <div id="migrationList" data-output></div>
+            <label for="migrationId">实际Migration ID</label
+            ><input
+              id="migrationId"
+              type="text"
+              aria-label="实际Migration ID"
+              autocomplete="off"
+              value=""
+            />
+            <div class="actions">
+              <button id="readMigration" type="button">消费者读取迁移提案</button
+              ><button id="authorReviewMigration" type="button">作者读取治理差异（元数据）</button
+              ><button id="reviewerReviewMigration" type="button">
+                Reviewer读取并核对治理差异
+              </button>
+            </div>
+            <div id="migrationReport" data-output></div>
+            <label for="migrationHash">服务端实际migrationHash（Reviewer读取治理差异后填入）</label
+            ><input
+              id="migrationHash"
+              type="text"
+              aria-label="服务端实际migrationHash（Reviewer读取治理差异后填入）"
+              autocomplete="off"
+              value=""
+              readonly
+            /><button id="approveMigration" type="button">独立Reviewer批准此Hash的迁移差异</button>
+            <p class="muted">
+              提案、迁移批准、目标case批准、新实际回放、替代验收是不同事实。批准迁移不证明版本等价或旧版本已修好；批准参考也不代表已经重验。
+            </p>
+            <label for="migrationReplayId">目标参考的实际通过Replay ID</label
+            ><input
+              id="migrationReplayId"
+              type="text"
+              aria-label="目标参考的实际通过Replay ID"
+              autocomplete="off"
+              value=""
+            /><label for="migrationResolveNote">Reviewer替代验收说明</label
+            ><textarea id="migrationResolveNote" aria-label="Reviewer替代验收说明"></textarea
+            ><button id="resolveMigration" type="button">Reviewer核对真实回放后替代验收</button>
+            <div id="migrationResolution" data-output></div>
+            <p class="callout warn">
+              RESOLVED_BY_REPLACEMENT表示新版本按受审义务替代验收，不改写旧case或旧失败；不承诺旧版本已修复，新的复发仍可重开。整体业务验收仍由外部责任方负责。
+            </p>
           </fieldset>
           <details>
             <summary>版本化覆盖提案 · 作者/Reviewer</summary>

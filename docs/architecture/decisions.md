@@ -86,3 +86,7 @@ MCP/API 必须鉴权；数据库/BI/调度服务端重新验权。受限 Link、
 ## ADR-019 共享物理目标版本
 
 见 [ADR-019](adr-019-shared-physical-target-versions.md)：完整物理目标 CAS、单调写意图、实时活动实现与旧回调隔离，保留现有平台执行边界。
+
+## ADR-020 受审模型替代与结局回归
+
+见 [ADR-020](adr-020-reviewed-repair-and-outcome-regressions.md)：旧义务不改写、同问题模型修订的受审替代、真实拒绝/未就绪参考及 BI 稳定来源投影。

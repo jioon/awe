@@ -64,7 +64,7 @@ Resolver 请求可用 `{ "text": "设备日活", "domain": "activity", "intent":
 | 环境变量 | 作用 |
 |---|---|
 | `AWE_BI_QUERY_URL`、`AWE_BI_QUERY_TOKEN` | 可信网关，POST `/query` |
-| `AWE_BI_QUERY_BINDINGS` | JSON 对象，bindingRef → `{capabilityRef,implementationVersion,implementationHash,rowScopeMode?}` |
+| `AWE_BI_QUERY_BINDINGS` | JSON 对象，bindingRef → `{capabilityRef,implementationVersion,implementationHash,rowScopeMode?,sourceProjectionRef?}` |
 | `AWE_DATA_READINESS_URL`、`AWE_DATA_READINESS_TOKEN` | 原生计算的可信数据状态，POST `/readiness` |
 | `AWE_METRIC_VERIFICATION_URL`、`AWE_METRIC_VERIFICATION_TOKEN` | 独立参考，POST `/verify` |
 | `AWE_METRIC_VERIFICATION_CHECKERS` | JSON 对象，checkerRef → `{implementationVersion,implementationHash}` |
@@ -82,6 +82,6 @@ readiness 包含 state、observedAt、snapshotRef、runRef、completeFrom/Throug
 
 `POST /api/feedback` 关联 observationId、issueCode、stage、description；作者通过 `/{id}/reviews` 记录 classification/ownerTeam/externalIssueRef/note。用户声明不自动成为根因。
 
-`POST /api/regressions/cases` 关联 observationId、expectedState、expectedFingerprint、referenceBasis、referenceEvidenceRef；审核者 `/{id}/approve` 后，消费者 `/{id}/replays` 以新 idempotencyKey 真实重放。Reviewer `POST /api/feedback/{id}/closures` 必须引用匹配且成功的回归证据。模型、请求范围、政策、物理绑定、实现不一致不能关闭原问题。改变正式语义或政策后需建立新版本参考义务并做显式迁移/业务验收；当前不自动证明跨版本等价，也不借新版本回放给旧问题发绿灯。完整字段及反例见 [KnowledgeLoopIntegrationTest](src/test/java/ai/awe/registry/KnowledgeLoopIntegrationTest.java)。
+`POST /api/regressions/cases` 关联 observationId、expectedState、expectedFingerprint、referenceBasis、referenceEvidenceRef；审核者 `/{id}/approve` 后，消费者 `/{id}/replays` 以新 idempotencyKey 真实重放。Reviewer `POST /api/feedback/{id}/closures` 必须引用匹配且成功的回归证据。模型、请求范围、政策、物理绑定、实现不一致不能关闭原问题。改变正式语义或政策后需建立新版本参考义务并做显式迁移/业务验收；受审模型替代现由独立迁移协议承载；它不自动证明跨版本等价，也不将新版本回放当成旧版本已修好。具体接口、期望分型和证明边界见 [REPAIR.md](REPAIR.md)。完整字段及反例见 [KnowledgeLoopIntegrationTest](src/test/java/ai/awe/registry/KnowledgeLoopIntegrationTest.java)。
 
 工作台 `/consumption.html` 保留真实 EXTRACT，`/metric-consumption.html` 消费指标并查看阶段/证明，`/knowledge.html` 展示解析、覆盖和修复回归。页面不存储 Token，不默认猜日期，不内置模拟答案。领域问题、角色和来源仍须真实配置。

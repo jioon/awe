@@ -131,6 +131,8 @@ public final class ApiAuthFilter extends OncePerRequestFilter {
                             || path.matches("/api/knowledge/coverage/[^/]+/approve")
                             || path.matches("/api/regressions/cases/[^/]+/approve")
                             || path.matches("/api/feedback/[^/]+/closures")
+                            || path.matches(
+                                    "/api/feedback/[^/]+/migrations/[^/]+/(approve|resolve)")
                             || path.matches("/api/production/admissions/[^/]+/approve");
             if (approve && !role.equals("reviewer")) {
                 res.sendError(403, "Reviewer required");
@@ -160,13 +162,17 @@ public final class ApiAuthFilter extends OncePerRequestFilter {
                 || path.equals("/api/mcp")
                 || path.equals("/api/feedback")
                 || path.equals("/api/regressions/cases")
+                || path.equals("/api/regressions/observations")
+                || path.matches("/api/feedback/[^/]+/migrations")
                 || path.matches("/api/regressions/cases/[^/]+/replays")
                 || (method.equals("GET") || method.equals("HEAD"))
                         && (path.matches("/api/feedback/[^/]+")
                                 || path.matches("/api/regressions/cases/[^/]+")
                                 || path.equals("/api/knowledge/coverage")
                                 || path.matches("/api/knowledge/observations/[^/]+")
-                                || path.matches("/api/regressions/replays/[^/]+"));
+                                || path.matches("/api/regressions/replays/[^/]+")
+                                || path.matches("/api/regressions/observations/[^/]+")
+                                || path.matches("/api/feedback/[^/]+/migrations/[^/]+"));
     }
 
     private static String normalizePath(HttpServletRequest request) {
