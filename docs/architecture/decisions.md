@@ -78,3 +78,7 @@ MCP/API 必须鉴权；数据库/BI/调度服务端重新验权。受限 Link、
 ## ADR-017 版本化数据能力与 PostgreSQL 受控取数
 
 见 [版本化数据能力与 PostgreSQL 受控取数](adr-017-controlled-dataset-consumption.md)。M1.1 以显式版本 Function/Dataset/行 Schema 约束真实取数，增加独立消费授权、原生来源观测、半开事件时间范围、预算与持久证据；当前可见数据不冒称账期到齐，结构检查不冒称独立对账或业务成功。
+
+## ADR-018 可执行能力与生产准入
+
+见 [ADR-018](adr-018-executable-capabilities-and-production-admission.md)：v3 可执行契约、有界 IR、统一消费与改进证据、在线一次性生产准入和版本化物化；复用现有平台执行，保留企业验收边界。

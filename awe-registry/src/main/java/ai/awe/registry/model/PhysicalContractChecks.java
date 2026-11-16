@@ -1,6 +1,7 @@
 package ai.awe.registry.model;
 
 import ai.awe.kernel.contract.AggregationContract;
+import ai.awe.kernel.contract.DatasetContract;
 import ai.awe.kernel.identity.EntityRef;
 import ai.awe.kernel.model.AweDefinition;
 import ai.awe.kernel.model.ObjectType;
@@ -37,21 +38,56 @@ public final class PhysicalContractChecks {
                     errors.add("Object identity must map to non-null source columns: " + identity);
             }
         } else if (model instanceof SemanticModel semantic) {
+            if (semantic instanceof SemanticModel.Metric
+                    && spec.path("schemaVersion").asInt() == 3) {
+                var contract = new TypedModels().metricContract(spec);
+                for (var output : contract.outputs()) {
+                    var actual = columns.get(output.name());
+                    if (actual == null
+                            || !compatibleType(output.type(), actual.path("type").asText())
+                            || output.nullable() != actual.path("nullable").asBoolean(true))
+                        errors.add(
+                                "Metric result output differs from its declared contract: "
+                                        + output.name());
+                }
+                if (!"bi".equals(binding.path("sourceSystem").asText()))
+                    errors.add(
+                            "Executable Metric direct bindings require an authoritative BI semantic provider");
+                var expected = semanticDefinition(spec);
+                if (!metadata.path("definition").equals(expected))
+                    errors.add("Authoritative BI semantic definition/facet missing or different");
+                return List.copyOf(errors);
+            }
             if (!new TreeSet<>(semantic.grain().keys()).equals(names(metadata.path("grainKeys"))))
                 errors.add("Declared source grain does not match model grain");
             checkGrainColumns(semantic, columns, errors);
-            checkTime(semantic, binding, metadata, columns, errors);
+            boolean staticSnapshot =
+                    semantic instanceof SemanticModel.Dataset
+                            && spec.path("schemaVersion").asInt() == 3
+                            && new TypedModels().datasetContract(spec).readMode()
+                                    == DatasetContract.ReadMode.STATIC_SNAPSHOT;
+            if (!staticSnapshot) checkTime(semantic, binding, metadata, columns, errors);
             if (semantic instanceof SemanticModel.Feature feature)
                 checkFeature(feature, binding, metadata, columns, errors);
             if (semantic instanceof SemanticModel.Metric metric) checkAggregation(metric, errors);
             if ("bi".equals(binding.path("sourceSystem").asText())) {
-                var expected = spec.path("model").deepCopy();
-                if (expected instanceof ObjectNode object) object.remove("ref");
+                var expected = semanticDefinition(spec);
                 if (!metadata.path("definition").equals(expected))
                     errors.add("Authoritative BI semantic definition missing or different");
             }
         } else errors.add("Direct physical bindings are not supported for this declaration family");
         return List.copyOf(errors);
+    }
+
+    private JsonNode semanticDefinition(JsonNode spec) {
+        var model = spec.path("model").deepCopy();
+        if (model instanceof ObjectNode object) object.remove("ref");
+        if (spec.path("schemaVersion").asInt() != 3) return model;
+        var result = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+        result.set("model", model);
+        for (String facet : List.of("metricContract", "datasetContract", "pipelineContract"))
+            if (spec.has(facet)) result.set(facet, spec.get(facet));
+        return result;
     }
 
     /** 派生 Metric/Feature 即使没有直接物理绑定，也必须满足精确版本 Dataset 的消费契约。 */

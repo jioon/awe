@@ -1,5 +1,6 @@
 package ai.awe.registry.consumption.jdbc;
 
+import ai.awe.kernel.contract.RelationalIR;
 import ai.awe.kernel.contract.TemporalContract;
 import ai.awe.kernel.model.ObjectType;
 import ai.awe.kernel.model.SemanticModel;
@@ -57,10 +58,16 @@ public final class PostgresDatasetExtractor {
     }
 
     public Result execute(Plan plan) {
+        return execute(plan, Optional.empty());
+    }
+
+    /** 强制条件只能由服务端授权上下文生成；旧入口保留无额外条件的受控行为。 */
+    public Result execute(Plan plan, Optional<RelationalIR.Predicate> serverScope) {
         String snapshot = "";
         long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
         try {
             validatePlan(plan);
+            CompiledScope scope = compileScope(plan.rowSchema(), serverScope);
             if (!warehouse.configured())
                 return result(
                         warehouse.status(),
@@ -86,6 +93,14 @@ public final class PostgresDatasetExtractor {
                     var properties = new HashMap<String, ObjectType.Property>();
                     plan.rowSchema().properties().forEach(p -> properties.put(p.name(), p));
                     checkSchema(plan, catalog, columns);
+                    for (String field : scope.fields()) {
+                        var property = properties.get(field);
+                        if (property.type() == ObjectType.DataType.TIMESTAMP
+                                && !columns.get(field).nativeType().equals("timestamptz"))
+                            throw new PostgresWarehouse.Failure(
+                                    "BLOCKED",
+                                    "Timestamp policy comparisons require timezone-aware physical values");
+                    }
                     String event = plan.binding().path("timeFields").path("EVENT_TIME").asText();
                     if (!columns.containsKey(event)
                             || !columns.get(event).nativeType().equals("timestamptz"))
@@ -94,7 +109,7 @@ public final class PostgresDatasetExtractor {
                                 snapshot,
                                 List.of(),
                                 "EVENT_TIME requires an actual PostgreSQL timestamptz column");
-                    String sql = sql(plan, catalog.relation(), event);
+                    String sql = sql(plan, catalog.relation(), event, scope.sql());
                     var rows = new ArrayList<Map<String, Object>>();
                     int bytes = 2;
                     try (PreparedStatement statement =
@@ -105,6 +120,9 @@ public final class PostgresDatasetExtractor {
                         statement.setMaxRows(plan.maxRows() + 1);
                         statement.setObject(1, plan.from().atOffset(ZoneOffset.UTC));
                         statement.setObject(2, plan.to().atOffset(ZoneOffset.UTC));
+                        int parameter = 3;
+                        for (BoundValue value : scope.parameters())
+                            value.bind(statement, parameter++);
                         try (ResultSet rs = statement.executeQuery()) {
                             while (rs.next()) {
                                 if (System.nanoTime() > deadline)
@@ -282,6 +300,10 @@ public final class PostgresDatasetExtractor {
     }
 
     static String sql(Plan plan, String relation, String event) {
+        return sql(plan, relation, event, "");
+    }
+
+    private static String sql(Plan plan, String relation, String event, String scope) {
         int cellLimit = Math.min(4096, plan.maxBytes());
         var selected = new ArrayList<String>();
         var overflow = new ArrayList<String>();
@@ -303,7 +325,9 @@ public final class PostgresDatasetExtractor {
                 + PostgresWarehouse.quoteIdentifier(event)
                 + ">=? AND "
                 + PostgresWarehouse.quoteIdentifier(event)
-                + "<? ORDER BY "
+                + "<?"
+                + (scope.isEmpty() ? "" : " AND (" + scope + ")")
+                + " ORDER BY "
                 + String.join(
                         ",",
                         plan.dataset().grain().keys().stream()
@@ -311,6 +335,149 @@ public final class PostgresDatasetExtractor {
                                 .toList())
                 + " LIMIT "
                 + (plan.maxRows() + 1);
+    }
+
+    private record BoundValue(ObjectType.DataType type, String value) {
+        private void bind(PreparedStatement statement, int index) throws SQLException {
+            switch (type) {
+                case STRING -> statement.setString(index, value);
+                case BOOLEAN -> statement.setBoolean(index, Boolean.parseBoolean(value));
+                case INTEGER, DECIMAL -> statement.setBigDecimal(index, new BigDecimal(value));
+                case DATE -> statement.setObject(index, LocalDate.parse(value));
+                case TIMESTAMP ->
+                        statement.setObject(index, Instant.parse(value).atOffset(ZoneOffset.UTC));
+                default -> throw scopeFailure();
+            }
+        }
+    }
+
+    private record CompiledScope(String sql, List<BoundValue> parameters, Set<String> fields) {
+        private CompiledScope {
+            parameters = List.copyOf(parameters);
+            fields = Set.copyOf(fields);
+        }
+    }
+
+    private static CompiledScope compileScope(
+            ObjectType schema, Optional<RelationalIR.Predicate> optional) {
+        if (optional == null) throw scopeFailure();
+        if (optional.isEmpty()) return new CompiledScope("", List.of(), Set.of());
+        var compiler = new ScopeCompiler(schema);
+        String sql = compiler.predicate(optional.get(), 0);
+        return new CompiledScope(sql, compiler.parameters, compiler.fields);
+    }
+
+    /** 此编译器只处理授权谓词；不接受表达式改写、业务 IR 或调用方 SQL。 */
+    private static final class ScopeCompiler {
+        private final Map<String, ObjectType.Property> properties = new HashMap<>();
+        private final List<BoundValue> parameters = new ArrayList<>();
+        private final Set<String> fields = new LinkedHashSet<>();
+        private int nodes;
+
+        private ScopeCompiler(ObjectType schema) {
+            schema.properties().forEach(p -> properties.put(p.name(), p));
+        }
+
+        private String predicate(RelationalIR.Predicate predicate, int depth) {
+            if (depth > 16 || ++nodes > 256) throw scopeFailure();
+            return switch (predicate) {
+                case RelationalIR.Compare compare -> {
+                    ObjectType.DataType left = type(compare.left()), right = type(compare.right());
+                    if (left != right
+                            || !(compare.left() instanceof RelationalIR.Field)
+                                    && !(compare.right() instanceof RelationalIR.Field))
+                        throw scopeFailure();
+                    String operator =
+                            switch (compare.operation()) {
+                                case EQ -> "=";
+                                case NE -> "<>";
+                                case LT -> "<";
+                                case LE -> "<=";
+                                case GT -> ">";
+                                case GE -> ">=";
+                            };
+                    yield "("
+                            + expression(compare.left())
+                            + operator
+                            + expression(compare.right())
+                            + ")";
+                }
+                case RelationalIR.In in -> {
+                    if (!(in.input() instanceof RelationalIR.Field)
+                            || in.values().isEmpty()
+                            || in.values().size() > 100) throw scopeFailure();
+                    ObjectType.DataType type = type(in.input());
+                    if (in.values().stream().anyMatch(value -> value.type() != type))
+                        throw scopeFailure();
+                    String field = expression(in.input());
+                    var values = in.values().stream().map(this::expression).toList();
+                    yield "("
+                            + field
+                            + (in.negated() ? " NOT IN (" : " IN (")
+                            + String.join(",", values)
+                            + "))";
+                }
+                case RelationalIR.All all -> joined(all.terms(), " AND ", depth);
+                case RelationalIR.Any any -> joined(any.terms(), " OR ", depth);
+                case RelationalIR.Not not -> "(NOT " + predicate(not.input(), depth + 1) + ")";
+                case RelationalIR.IsNull nullable -> {
+                    if (!(nullable.input() instanceof RelationalIR.Field)) throw scopeFailure();
+                    yield "("
+                            + expression(nullable.input())
+                            + (nullable.negated() ? " IS NOT NULL)" : " IS NULL)");
+                }
+            };
+        }
+
+        private String joined(List<RelationalIR.Predicate> terms, String operator, int depth) {
+            if (terms.isEmpty() || terms.size() > 32) throw scopeFailure();
+            return "("
+                    + String.join(
+                            operator,
+                            terms.stream().map(term -> predicate(term, depth + 1)).toList())
+                    + ")";
+        }
+
+        private ObjectType.DataType type(RelationalIR.Expr expression) {
+            return switch (expression) {
+                case RelationalIR.Field field -> {
+                    if (!field.name().startsWith("extract.")) throw scopeFailure();
+                    String name = field.name().substring("extract.".length());
+                    var property = properties.get(name);
+                    if (property == null) throw scopeFailure();
+                    PostgresWarehouse.quoteIdentifier(name);
+                    fields.add(name);
+                    yield property.type();
+                }
+                case RelationalIR.Literal literal -> literal.type();
+                default -> throw scopeFailure();
+            };
+        }
+
+        private String expression(RelationalIR.Expr expression) {
+            ObjectType.DataType type = type(expression);
+            if (type == ObjectType.DataType.JSON || type == ObjectType.DataType.ENTITY_REF)
+                throw scopeFailure();
+            if (expression instanceof RelationalIR.Field field)
+                return PostgresWarehouse.quoteIdentifier(
+                        field.name().substring("extract.".length()));
+            var literal = (RelationalIR.Literal) expression;
+            if (type == ObjectType.DataType.TIMESTAMP) {
+                Instant value = Instant.parse(literal.value());
+                if (value.getNano() % 1000 != 0
+                        || value.isBefore(Instant.parse("0001-01-01T00:00:00Z"))
+                        || !value.isBefore(Instant.parse("+10000-01-01T00:00:00Z")))
+                    throw scopeFailure();
+            }
+            if (parameters.size() >= 512) throw scopeFailure();
+            parameters.add(new BoundValue(type, literal.value()));
+            return "?";
+        }
+    }
+
+    private static PostgresWarehouse.Failure scopeFailure() {
+        return new PostgresWarehouse.Failure(
+                "BLOCKED", "Unsupported or mistyped mandatory extraction scope");
     }
 
     private Object readCell(ResultSet rs, int index, ObjectType.Property property, Column column)

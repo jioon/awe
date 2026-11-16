@@ -5,10 +5,10 @@ import java.net.*;
 import java.util.*;
 
 /** Uses the environment's supplied routing; never replaces the platform proxy or its TLS trust. */
-final class EnvironmentProxySelector extends ProxySelector {
+public final class EnvironmentProxySelector extends ProxySelector {
     private final Map<String, String> env;
 
-    EnvironmentProxySelector(Map<String, String> env) {
+    public EnvironmentProxySelector(Map<String, String> env) {
         this.env = Map.copyOf(env);
     }
 
@@ -47,7 +47,7 @@ final class EnvironmentProxySelector extends ProxySelector {
         return false;
     }
 
-    static boolean isLoopback(String host) {
+    public static boolean isLoopback(String host) {
         return host.equalsIgnoreCase("localhost")
                 || host.equals("127.0.0.1")
                 || host.equals("::1")

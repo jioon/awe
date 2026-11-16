@@ -290,7 +290,7 @@
     const list = $("taskList");
     list.replaceChildren();
     if (!tasks.length) list.append(element("p", "当前主体当前授权范围内没有可见操作。", "empty"));
-    for (const task of tasks)
+    for (const task of tasks.filter((task) => !task.resolved?.metric))
       list.append(
         card(task.id, (task.status || "未取得") + " · " + taskTime(task.createdAt), () =>
           loadTask(task.id),
@@ -307,13 +307,23 @@
     try {
       const profiles = await api("/capabilities");
       if (!Array.isArray(profiles)) throw Error("能力发现响应格式不受支持。");
-      capabilities = profiles;
+      capabilities = profiles.filter(
+        (profile) => profile.intent === undefined || profile.intent === "EXTRACT",
+      );
       renderCapabilities();
       await loadTasks();
       $("sessionState").textContent = "已加载当前授权范围";
       $("sessionState").className = "badge good";
-      if (capabilities.length) selectCapability(capabilities[0]);
-      else {
+      if (capabilities.length) {
+        const p = new URLSearchParams(location.search),
+          id = p.get("releaseId"),
+          hash = p.get("contentHash");
+        const match = id
+          ? capabilities.find((cap) => cap.releaseId === id && (!hash || cap.contentHash === hash))
+          : capabilities[0];
+        if (match) selectCapability(match);
+        else notice("确认候选不在当前授权取数列表中，不替换为其他能力。", true);
+      } else {
         $("capabilityEmpty").textContent = "没有可用授权能力；不生成示例发布、字段或数据。";
         notice("已读取服务端实际列表，当前没有可用授权能力。");
       }
@@ -603,7 +613,9 @@
   }
   async function loadTask(id) {
     if (!/^[a-fA-F0-9-]{36}$/.test(id)) throw Error("请输入合法操作 UUID。");
-    renderTask(await api("/data-tasks/" + encodeURIComponent(id)));
+    const task = await api("/data-tasks/" + encodeURIComponent(id));
+    if (task.resolved?.metric) throw Error("该操作属于正式指标，请使用指标消费入口。");
+    renderTask(task);
   }
   $("consumerToken").oninput = () => {
     invalidateIdentity();

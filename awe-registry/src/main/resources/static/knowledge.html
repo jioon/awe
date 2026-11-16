@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>AWE · 知识发现与证据反馈</title>
+    <link rel="stylesheet" href="/workbench-pages.css" />
+    <script src="/exact-json.js" defer></script>
+    <script src="/workbench-pages.js" defer></script>
+    <script src="/knowledge.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <h1>AWE · 知识发现与证据反馈</h1>
+      <p>发现候选、确认范围、保留未知，并通过受审参考与实际回放推动改进。</p>
+      <nav class="entry-links">
+        <a href="/">模型生产</a><a href="/consumption.html">Dataset取数</a
+        ><a href="/metric-consumption.html">正式指标</a><a href="/knowledge.html">知识与反馈</a
+        ><a href="/production.html">变更准入</a>
+      </nav>
+    </header>
+    <main>
+      <section class="panel">
+        <div class="token-grid">
+          <div>
+            <label for="knowledgeConsumerToken">消费者Token</label
+            ><input
+              id="knowledgeConsumerToken"
+              type="password"
+              aria-label="消费者Token"
+              autocomplete="off"
+              value=""
+            />
+          </div>
+          <div>
+            <label for="knowledgeAuthorToken">作者Token（审核归因/覆盖提案）</label
+            ><input
+              id="knowledgeAuthorToken"
+              type="password"
+              aria-label="作者Token（审核归因/覆盖提案）"
+              autocomplete="off"
+              value=""
+            />
+          </div>
+          <div>
+            <label for="knowledgeReviewerToken">独立Reviewer Token（批准/技术闭合）</label
+            ><input
+              id="knowledgeReviewerToken"
+              type="password"
+              aria-label="独立Reviewer Token（批准/技术闭合）"
+              autocomplete="off"
+              value=""
+            />
+          </div>
+        </div>
+        <div id="notice" role="status" aria-live="polite"></div>
+        <p class="callout warn">
+          所有列表、判断和证据均来自实际API。未知、未配置、未就绪或缺少验证不转为成功；AWE不执行任意脚本、编排Agent流程或替代外部整体业务验收。
+        </p>
+        <div class="stack">
+          <fieldset>
+            <legend>知识发现与明确消歧 · 消费者</legend>
+            <div class="grid">
+              <label for="knowledgeText">数据术语或任务数据需求</label
+              ><input
+                id="knowledgeText"
+                type="text"
+                aria-label="数据术语或任务数据需求"
+                autocomplete="off"
+                value=""
+              /><label for="knowledgeDomain">可选领域代码</label
+              ><input
+                id="knowledgeDomain"
+                type="text"
+                aria-label="可选领域代码"
+                autocomplete="off"
+                value=""
+              /><label for="knowledgeIntent">数据意图</label
+              ><select id="knowledgeIntent" aria-label="数据意图">
+                <option value="QUERY_METRIC">QUERY_METRIC</option>
+                <option value="EXTRACT">EXTRACT</option></select
+              ><label for="knowledgeFunctionId">可选规范Function ID</label
+              ><input
+                id="knowledgeFunctionId"
+                type="text"
+                aria-label="可选规范Function ID"
+                autocomplete="off"
+                value=""
+              /><label for="knowledgeReleaseId">可选精确Release ID</label
+              ><input
+                id="knowledgeReleaseId"
+                type="text"
+                aria-label="可选精确Release ID"
+                autocomplete="off"
+                value=""
+              /><label for="knowledgeContentHash">可选精确内容Hash</label
+              ><input
+                id="knowledgeContentHash"
+                type="text"
+                aria-label="可选精确内容Hash"
+                autocomplete="off"
+                value=""
+              />
+            </div>
+            <div class="actions">
+              <button id="resolveKnowledge" type="button">召回与解析</button
+              ><button id="assessKnowledge" type="button">评估支持范围</button
+              ><button id="loadCoverage" type="button">读取受审覆盖</button>
+            </div>
+            <p class="muted">
+              候选排序不认证业务等价。单个模糊候选也需明确确认；未召回保持UNKNOWN，只有服务端受审范围证明才能声明MISSING。
+            </p>
+            <div id="knowledgeResolution" data-output></div>
+            <div id="knowledgeCandidates" data-output></div>
+            <div id="knowledgeCoverage" data-output></div>
+          </fieldset>
+          <fieldset>
+            <legend>关联真实观测的反馈 · 消费者</legend>
+            <div class="grid">
+              <label for="feedbackObservationId">真实数据操作/解析观测ID</label
+              ><input
+                id="feedbackObservationId"
+                type="text"
+                aria-label="真实数据操作/解析观测ID"
+                autocomplete="off"
+                value=""
+              /><label for="feedbackIssue">问题类型</label
+              ><select id="feedbackIssue" aria-label="问题类型">
+                <option value="KNOWLEDGE_GAP">KNOWLEDGE_GAP</option>
+                <option value="WRONG_RESULT">WRONG_RESULT</option>
+                <option value="AMBIGUITY">AMBIGUITY</option>
+                <option value="EXECUTION_FAILURE">EXECUTION_FAILURE</option>
+                <option value="AGENT_INTERPRETATION">AGENT_INTERPRETATION</option>
+                <option value="VALIDATION_REQUEST">VALIDATION_REQUEST</option>
+                <option value="OTHER">OTHER</option></select
+              ><label for="feedbackStage">失败阶段</label
+              ><select id="feedbackStage" aria-label="失败阶段">
+                <option value="DISCOVERY">DISCOVERY</option>
+                <option value="RESOLUTION">RESOLUTION</option>
+                <option value="ASSESSMENT">ASSESSMENT</option>
+                <option value="PLAN">PLAN</option>
+                <option value="ACCESS">ACCESS</option>
+                <option value="READINESS">READINESS</option>
+                <option value="EXECUTION">EXECUTION</option>
+                <option value="VERIFICATION">VERIFICATION</option>
+                <option value="CONSUMER">CONSUMER</option>
+              </select>
+            </div>
+            <label for="feedbackDescription">问题说明与证据上下文</label
+            ><textarea id="feedbackDescription" aria-label="问题说明与证据上下文"></textarea>
+            <div class="actions">
+              <button id="reportFeedback" type="button">提交证据关联反馈</button
+              ><button id="loadFeedback" type="button">读取我的反馈</button>
+            </div>
+            <div id="feedbackReport" data-output></div>
+            <div id="feedbackList" data-output></div>
+          </fieldset>
+          <details>
+            <summary>责任归因与技术闭合 · 作者/独立Reviewer</summary>
+            <fieldset>
+              <div class="grid">
+                <label for="feedbackId">实际反馈ID</label
+                ><input
+                  id="feedbackId"
+                  type="text"
+                  aria-label="实际反馈ID"
+                  autocomplete="off"
+                  value=""
+                /><label for="feedbackClassification">责任分类</label
+                ><select id="feedbackClassification" aria-label="责任分类">
+                  <option value="UNKNOWN">UNKNOWN</option>
+                  <option value="MODEL_GAP">MODEL_GAP</option>
+                  <option value="RETRIEVAL_GAP">RETRIEVAL_GAP</option>
+                  <option value="DATA_QUALITY">DATA_QUALITY</option>
+                  <option value="PLATFORM_FAILURE">PLATFORM_FAILURE</option>
+                  <option value="POLICY">POLICY</option>
+                  <option value="AGENT_USAGE">AGENT_USAGE</option></select
+                ><label for="feedbackOwner">责任团队</label
+                ><input
+                  id="feedbackOwner"
+                  type="text"
+                  aria-label="责任团队"
+                  autocomplete="off"
+                  value=""
+                /><label for="feedbackExternalRef">可选外部问题单引用</label
+                ><input
+                  id="feedbackExternalRef"
+                  type="text"
+                  aria-label="可选外部问题单引用"
+                  autocomplete="off"
+                  value=""
+                />
+              </div>
+              <label for="feedbackReviewNote">作者归因说明</label
+              ><textarea id="feedbackReviewNote" aria-label="作者归因说明"></textarea
+              ><button id="reviewFeedback" type="button">作者登记归因</button
+              ><label for="feedbackReplayId">同范围实际通过的回归Replay ID</label
+              ><input
+                id="feedbackReplayId"
+                type="text"
+                aria-label="同范围实际通过的回归Replay ID"
+                autocomplete="off"
+                value=""
+              /><label for="feedbackClosureNote">Reviewer技术闭合说明</label
+              ><textarea id="feedbackClosureNote" aria-label="Reviewer技术闭合说明"></textarea
+              ><button id="closeFeedback" type="button">Reviewer核对实际回放并技术闭合</button>
+              <div id="feedbackReview" data-output></div>
+              <p class="muted">
+                AGENT_USAGE/整体解释错误仍由外部责任方验收；数据回放不能自动关闭整体任务。
+              </p>
+            </fieldset>
+          </details>
+          <fieldset>
+            <legend>受审参考与实际回归</legend>
+            <p class="muted">
+              参考必须提供真实依据与外部证据，不默认以错误操作自身Hash充当真值。批准参考与执行回放分别保存。
+            </p>
+            <div class="grid">
+              <label for="regressionObservationId">实际锚点观测ID</label
+              ><input
+                id="regressionObservationId"
+                type="text"
+                aria-label="实际锚点观测ID"
+                autocomplete="off"
+                value=""
+              /><label for="regressionExpectedState">参考结果状态</label
+              ><select id="regressionExpectedState" aria-label="参考结果状态">
+                <option value="RECORDS">RECORDS</option>
+                <option value="NO_RECORD">NO_RECORD</option>
+                <option value="ZERO">ZERO</option>
+                <option value="NULL">NULL</option>
+                <option value="RESOLVED">RESOLVED</option>
+                <option value="AMBIGUOUS">AMBIGUOUS</option>
+                <option value="UNRESOLVED">UNRESOLVED</option></select
+              ><label for="regressionFingerprint">实际参考Fingerprint（SHA256）</label
+              ><input
+                id="regressionFingerprint"
+                type="text"
+                aria-label="实际参考Fingerprint（SHA256）"
+                autocomplete="off"
+                value=""
+              /><label for="regressionEvidenceRef">独立参考证据引用</label
+              ><input
+                id="regressionEvidenceRef"
+                type="text"
+                aria-label="独立参考证据引用"
+                autocomplete="off"
+                value=""
+              />
+            </div>
+            <label for="regressionBasis">参考依据说明</label
+            ><textarea id="regressionBasis" aria-label="参考依据说明"></textarea
+            ><button id="proposeRegression" type="button">消费者提出参考案例</button>
+            <div class="grid">
+              <label for="regressionCaseId">实际回归Case ID</label
+              ><input
+                id="regressionCaseId"
+                type="text"
+                aria-label="实际回归Case ID"
+                autocomplete="off"
+                value=""
+              /><label for="regressionReplayKey">本次实际回放幂等键</label
+              ><input
+                id="regressionReplayKey"
+                type="text"
+                aria-label="本次实际回放幂等键"
+                autocomplete="off"
+                value=""
+              />
+            </div>
+            <div class="actions">
+              <button id="readRegression" type="button">消费者读取案例</button
+              ><button id="approveRegression" type="button">Reviewer独立批准参考</button
+              ><button id="replayRegression" type="button">消费者按同义务实际回放</button>
+            </div>
+            <label for="regressionReplayId">实际Replay ID</label
+            ><input
+              id="regressionReplayId"
+              type="text"
+              aria-label="实际Replay ID"
+              autocomplete="off"
+              value=""
+            /><button id="readRegressionReplay" type="button">读取实际回归证据</button>
+            <div id="regressionReport" data-output></div>
+          </fieldset>
+          <details>
+            <summary>版本化覆盖提案 · 作者/Reviewer</summary>
+            <fieldset>
+              <p class="muted">
+                填写正式coverage文档：domain、version、ownerTeam、validUntil、complete、operations、assetReleases、aliases、sourceAssets、limitations。资产必须来自已发布版本，sourceAssets使用实际快照，不填模拟清单。
+              </p>
+              <label for="coverageDocument">实际覆盖声明JSON</label
+              ><textarea id="coverageDocument" aria-label="实际覆盖声明JSON" rows="12"></textarea
+              ><button id="proposeCoverage" type="button">作者提交覆盖声明</button
+              ><label for="coverageId">实际Coverage ID</label
+              ><input
+                id="coverageId"
+                type="text"
+                aria-label="实际Coverage ID"
+                autocomplete="off"
+                value=""
+              /><button id="approveCoverage" type="button">Reviewer批准实际覆盖范围</button>
+              <div id="coverageProposal" data-output></div>
+            </fieldset>
+          </details>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -29,10 +29,13 @@ public final class ModelCompatibility {
     public Map<String, Object> compare(String type, JsonNode previous, JsonNode candidate) {
         var reasons = new ArrayList<String>();
         if (previous == null) return report(reasons);
-        if (previous.path("schemaVersion").asInt() != 2) {
+        if (previous.path("schemaVersion").asInt() != 2
+                && previous.path("schemaVersion").asInt() != 3) {
             reasons.add("Legacy release requires an explicitly reviewed major-version migration");
             return report(reasons);
         }
+        if (previous.path("schemaVersion").asInt() != candidate.path("schemaVersion").asInt())
+            reasons.add("Schema contract migration requires explicit major-version review");
         JsonNode before = withoutVersion(previous.path("model")),
                 after = withoutVersion(candidate.path("model"));
         if ("ObjectType".equals(type)) {
@@ -55,6 +58,9 @@ public final class ModelCompatibility {
             reasons.add("Physical implementation binding changed");
         if (!previous.path("dependsOn").equals(candidate.path("dependsOn")))
             reasons.add("Pinned dependency manifest changed");
+        for (String facet : List.of("metricContract", "pipelineContract", "datasetContract"))
+            if (!previous.path(facet).equals(candidate.path(facet)))
+                reasons.add("Executable typed facet changed: " + facet);
         return report(reasons);
     }
 

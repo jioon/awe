@@ -1,6 +1,7 @@
 package ai.awe.registry.api;
 
 import ai.awe.registry.consumption.ConsumerAccess;
+import ai.awe.registry.production.PlatformAccess;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -8,6 +9,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -18,14 +20,23 @@ import org.springframework.web.util.UriUtils;
 public final class ApiAuthFilter extends OncePerRequestFilter {
     private final String author, reviewer;
     private final ConsumerAccess consumers;
+    private final PlatformAccess platforms;
 
+    @Autowired
     public ApiAuthFilter(
             @Value("${awe.auth.author-token:}") String author,
             @Value("${awe.auth.reviewer-token:}") String reviewer,
-            ConsumerAccess consumers) {
+            ConsumerAccess consumers,
+            PlatformAccess platforms) {
         this.author = author;
         this.reviewer = reviewer;
         this.consumers = consumers;
+        this.platforms = platforms;
+    }
+
+    /** 保留显式构造的单元测试与非平台嵌入调用；该形态不授予任何平台权限。 */
+    public ApiAuthFilter(String author, String reviewer, ConsumerAccess consumers) {
+        this(author, reviewer, consumers, null);
     }
 
     @Override
@@ -50,18 +61,40 @@ public final class ApiAuthFilter extends OncePerRequestFilter {
             res.sendError(400, "Invalid request path");
             return;
         }
-        if (path.equals("/api/data-tasks")
-                || path.startsWith("/api/data-tasks/")
-                || path.equals("/api/capabilities")) {
+        if (path.matches("/api/production/admissions/[^/]+/(consume|realizations)")) {
+            String auth = req.getHeader("Authorization");
+            if (auth == null || !auth.startsWith("Bearer ")) {
+                res.sendError(401, "Bearer token required");
+                return;
+            }
+            if (platforms == null) {
+                res.sendError(503, "Production caller policies are missing or invalid");
+                return;
+            }
+            try {
+                var grant = platforms.authenticate(auth.substring(7));
+                req.setAttribute("awe.platform", grant);
+                req.setAttribute("awe.platformGrant", grant);
+                req.setAttribute("awe.actor", grant.principal());
+            } catch (ResponseStatusException denied) {
+                res.sendError(denied.getStatusCode().value(), denied.getReason());
+                return;
+            }
+            chain.doFilter(req, res);
+            return;
+        }
+        if (consumerPath(path, req.getMethod())) {
             String auth = req.getHeader("Authorization");
             if (auth == null || !auth.startsWith("Bearer ")) {
                 res.sendError(401, "Bearer token required");
                 return;
             }
             try {
-                var grant = consumers.authenticate(auth.substring(7));
+                var authenticated = consumers.authenticateContext(auth.substring(7));
+                var grant = authenticated.grant();
                 req.setAttribute("awe.consumer", grant);
                 req.setAttribute("awe.actor", grant.principal());
+                req.setAttribute("awe.identity", authenticated.identity());
             } catch (ResponseStatusException denied) {
                 res.sendError(denied.getStatusCode().value(), denied.getReason());
                 return;
@@ -93,7 +126,12 @@ public final class ApiAuthFilter extends OncePerRequestFilter {
                     default -> false;
                 };
         if (write) {
-            boolean approve = path.matches("/api/drafts/[^/]+/(approve|publish)");
+            boolean approve =
+                    path.matches("/api/drafts/[^/]+/(approve|publish)")
+                            || path.matches("/api/knowledge/coverage/[^/]+/approve")
+                            || path.matches("/api/regressions/cases/[^/]+/approve")
+                            || path.matches("/api/feedback/[^/]+/closures")
+                            || path.matches("/api/production/admissions/[^/]+/approve");
             if (approve && !role.equals("reviewer")) {
                 res.sendError(403, "Reviewer required");
                 return;
@@ -110,6 +148,25 @@ public final class ApiAuthFilter extends OncePerRequestFilter {
     private static boolean secureEquals(String a, String b) {
         return MessageDigest.isEqual(
                 a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static boolean consumerPath(String path, String method) {
+        return path.equals("/api/data-tasks")
+                || path.startsWith("/api/data-tasks/")
+                || path.equals("/api/capabilities")
+                || path.equals("/api/knowledge/resolve")
+                || path.equals("/api/knowledge/assess")
+                || path.equals("/api/semantic-plans/validate")
+                || path.equals("/api/mcp")
+                || path.equals("/api/feedback")
+                || path.equals("/api/regressions/cases")
+                || path.matches("/api/regressions/cases/[^/]+/replays")
+                || (method.equals("GET") || method.equals("HEAD"))
+                        && (path.matches("/api/feedback/[^/]+")
+                                || path.matches("/api/regressions/cases/[^/]+")
+                                || path.equals("/api/knowledge/coverage")
+                                || path.matches("/api/knowledge/observations/[^/]+")
+                                || path.matches("/api/regressions/replays/[^/]+"));
     }
 
     private static String normalizePath(HttpServletRequest request) {
