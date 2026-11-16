@@ -411,6 +411,10 @@ public final class ConsumerAccess {
                 .fields();
     }
 
+    public void requireCurrent(Grant grant) {
+        current(grant);
+    }
+
     private void current(Grant grant) {
         if (grant == null
                 || grant.principal() == null

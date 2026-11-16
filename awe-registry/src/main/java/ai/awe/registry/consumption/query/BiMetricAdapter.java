@@ -124,7 +124,12 @@ public final class BiMetricAdapter {
         }
     }
 
-    private record Binding(String capabilityRef, String version, String hash, boolean rowScope) {}
+    private record Binding(
+            String capabilityRef,
+            String version,
+            String hash,
+            boolean rowScope,
+            String sourceProjectionRef) {}
 
     private final JsonDocuments json;
     private final TrustedHttpGateway gateway;
@@ -183,7 +188,8 @@ public final class BiMetricAdapter {
                                                     "capabilityRef",
                                                     "implementationVersion",
                                                     "implementationHash",
-                                                    "rowScopeMode"));
+                                                    "rowScopeMode",
+                                                    "sourceProjectionRef"));
                                     String ref = text(value, "capabilityRef", 500),
                                             version = text(value, "implementationVersion", 500),
                                             hash = digest(value, "implementationHash");
@@ -199,7 +205,13 @@ public final class BiMetricAdapter {
                                                     ref,
                                                     version,
                                                     hash,
-                                                    mode.equals("PREDICATE_V1")));
+                                                    mode.equals("PREDICATE_V1"),
+                                                    value.has("sourceProjectionRef")
+                                                            ? text(
+                                                                    value,
+                                                                    "sourceProjectionRef",
+                                                                    500)
+                                                            : ""));
                                 });
             }
         } catch (RuntimeException ex) {
@@ -325,6 +337,8 @@ public final class BiMetricAdapter {
                         "policyHash",
                         plan.policyHash()));
         body.put("budgets", Map.of("maxRows", plan.maxRows(), "maxBytes", plan.maxBytes()));
+        if (!binding.sourceProjectionRef().isEmpty())
+            body.put("sourceProjectionRef", binding.sourceProjectionRef());
         body.put("rowScope", rowScope);
         body.put("scanWindows", scanWindows);
         body.put("realizations", lineage);
@@ -379,7 +393,8 @@ public final class BiMetricAdapter {
                         "snapshotRef",
                         "runRef",
                         "scanCoverage",
-                        "realizations"));
+                        "realizations",
+                        "sourceProjectionRef"));
         String state = text(readiness, "state", 40),
                 snapshot = text(readiness, "snapshotRef", 1000),
                 run = text(readiness, "runRef", 1000);
@@ -409,6 +424,14 @@ public final class BiMetricAdapter {
         evidence.put("implementationVersion", binding.version());
         evidence.put("implementationHash", binding.hash());
         evidence.put("gatewayConfigurationHash", gateway.configurationHash());
+        // 投影身份只能由管理员绑定并经可信网关核对；不能从每次变化的 opaque snapshot 猜测。
+        if (!binding.sourceProjectionRef().isEmpty()) {
+            if (!binding.sourceProjectionRef().equals(text(readiness, "sourceProjectionRef", 500)))
+                throw new IllegalArgumentException(
+                        "BI source projection differs from the registered binding");
+            evidence.put("sourceProjectionRef", binding.sourceProjectionRef());
+        } else if (readiness.has("sourceProjectionRef"))
+            throw new IllegalArgumentException("Unregistered BI source projection assertion");
         evidence.put("runRef", run);
         evidence.put("snapshotRef", snapshot);
         evidence.put("observedAt", observedAt.toString());

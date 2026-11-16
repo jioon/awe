@@ -46,19 +46,22 @@ public class FeedbackService {
     private final JsonDocuments json;
     private final DataTaskOperations operations;
     private final KnowledgeService knowledge;
+    private final RegressionObservations observations;
 
     public FeedbackService(
             JdbcTemplate db,
             JsonDocuments json,
             DataTaskOperations operations,
-            KnowledgeService knowledge) {
+            KnowledgeService knowledge,
+            RegressionObservations observations) {
         this.db = db;
         this.json = json;
         this.operations = operations;
         this.knowledge = knowledge;
+        this.observations = observations;
     }
 
-    private record Evidence(
+    record Evidence(
             String kind,
             UUID id,
             JsonNode request,
@@ -160,44 +163,61 @@ public class FeedbackService {
         return feedback(id);
     }
 
+    @Transactional
     public Map<String, Object> proposeCase(JsonNode request, ConsumerAccess.Grant grant) {
         KnowledgeJson.fields(
                 request,
                 "observationId",
                 "expectedState",
                 "expectedFingerprint",
+                "expectation",
                 "referenceBasis",
                 "referenceEvidenceRef");
         Evidence anchor = evidence(KnowledgeJson.uuid(request, "observationId"), grant);
         if ("RUNNING".equals(anchor.document().path("status").asText()))
             throw new IllegalArgumentException("A regression anchor needs terminal evidence");
-        String state = KnowledgeJson.text(request, "expectedState", 50),
-                fingerprint = KnowledgeJson.hash(request, "expectedFingerprint");
         String basis = KnowledgeJson.text(request, "referenceBasis", 2000),
                 reference = KnowledgeJson.text(request, "referenceEvidenceRef", 500);
-        if (anchor.kind().equals("DATA")
-                        && !Set.of("RECORDS", "NO_RECORD", "ZERO", "NULL").contains(state)
-                || anchor.kind().equals("RESOLUTION")
-                        && !Set.of("RESOLVED", "AMBIGUOUS", "UNRESOLVED").contains(state))
-            throw new IllegalArgumentException(
-                    "Regression reference must express a supported scoped result state");
+        JsonNode expectation = null;
+        String state, fingerprint, scope = anchor.scopeHash();
+        if (request.has("expectation")) {
+            if (request.has("expectedState") || request.has("expectedFingerprint"))
+                throw new IllegalArgumentException("Typed and legacy expectations cannot be mixed");
+            expectation =
+                    RegressionExpectations.decode(request.path("expectation"), anchor.kind(), json);
+            if (RegressionExpectations.outcome(expectation)) {
+                state = expectation.path("status").asText();
+                var value = ((ObjectNode) expectation).deepCopy();
+                value.remove("type");
+                fingerprint = json.sha256(value);
+                scope = outcomeScope(anchor.request(), anchor.document());
+            } else {
+                state = expectation.path("state").asText();
+                fingerprint = expectation.path("fingerprint").asText();
+            }
+        } else {
+            state = KnowledgeJson.text(request, "expectedState", 50);
+            fingerprint = KnowledgeJson.hash(request, "expectedFingerprint");
+            if (anchor.kind().equals("DATA")
+                            && !Set.of("RECORDS", "NO_RECORD", "ZERO", "NULL").contains(state)
+                    || anchor.kind().equals("RESOLUTION")
+                            && !Set.of("RESOLVED", "AMBIGUOUS", "UNRESOLVED").contains(state))
+                throw new IllegalArgumentException(
+                        "Regression reference must express a supported scoped result state");
+        }
         UUID id = UUID.randomUUID();
-        var manifest =
-                Map.of(
-                        "kind",
-                        anchor.kind(),
-                        "request",
-                        anchor.request(),
-                        "scopeHash",
-                        anchor.scopeHash(),
-                        "expectedState",
-                        state,
-                        "expectedFingerprint",
-                        fingerprint,
-                        "referenceBasis",
-                        basis,
-                        "referenceEvidenceRef",
-                        reference);
+        var manifest = new LinkedHashMap<String, Object>();
+        manifest.put("kind", anchor.kind());
+        manifest.put("request", anchor.request());
+        manifest.put("scopeHash", scope);
+        manifest.put("expectedState", state);
+        manifest.put("expectedFingerprint", fingerprint);
+        manifest.put("referenceBasis", basis);
+        manifest.put("referenceEvidenceRef", reference);
+        if (expectation != null) {
+            manifest.put("caseFormatVersion", 2);
+            manifest.put("expectation", expectation);
+        }
         String hash = json.sha256(json.parse(json.write(manifest)));
         db.update(
                 "INSERT INTO awe_regression_case(id,principal,anchor_id,observation_kind,request_doc,scope_hash,case_hash,expected_state,expected_fingerprint,reference_basis,reference_evidence_ref,proposed_by) VALUES(?,?,?,?,?::jsonb,?,?,?,?,?,?,?)",
@@ -206,13 +226,19 @@ public class FeedbackService {
                 anchor.id(),
                 anchor.kind(),
                 json.canonical(anchor.request()),
-                anchor.scopeHash(),
+                scope,
                 hash,
                 state,
                 fingerprint,
                 basis,
                 reference,
                 grant.principal());
+        if (expectation != null)
+            db.update(
+                    "INSERT INTO awe_regression_expectation(case_id,expectation,expectation_hash) VALUES(?,?::jsonb,?)",
+                    id,
+                    json.canonical(expectation),
+                    json.sha256(expectation));
         return regressionCase(id, grant);
     }
 
@@ -254,36 +280,71 @@ public class FeedbackService {
                         key);
         if (!previous.isEmpty()) return replayRow((UUID) previous.getFirst().get("id"), grant);
         JsonNode original = (JsonNode) reference.get("request_doc");
+        JsonNode expectation = (JsonNode) reference.get("expectation");
+        boolean outcome = RegressionExpectations.outcome(expectation);
+        String childKey =
+                "regression."
+                        + json.sha256(
+                                json.parse(
+                                        json.write(Map.of("caseId", id.toString(), "key", key))));
         JsonNode actual;
         if ("DATA".equals(reference.get("observation_kind"))) {
-            ObjectNode replay = original.deepCopy();
-            replay.put(
-                    "idempotencyKey",
-                    "regression."
-                            + json.sha256(
-                                    json.parse(
-                                            json.write(
-                                                    Map.of("caseId", id.toString(), "key", key)))));
-            actual = json.parse(json.write(operations.create(replay, grant, identity)));
+            if ("TYPED_V2".equals(reference.get("expectationFormat")))
+                actual =
+                        json.parse(
+                                json.write(
+                                        observations.observe(original, childKey, grant, identity)));
+            else {
+                ObjectNode replay = original.deepCopy();
+                replay.put("idempotencyKey", childKey);
+                actual = json.parse(json.write(operations.create(replay, grant, identity)));
+            }
         } else actual = json.parse(json.write(knowledge.resolve(original, grant)));
+        if ("RUNNING".equals(actual.path("status").asText()))
+            throw new IllegalStateException(
+                    "Regression observation is still running; retry the same key");
         UUID operation = UUID.fromString(actual.path("id").asText());
         Evidence observed = evidence(operation, grant);
+        String actualScope =
+                outcome
+                        ? outcomeScope(observed.request(), observed.document())
+                        : observed.scopeHash();
+        String actualState =
+                outcome
+                        ? RegressionExpectations.actual(observed.document(), json)
+                                .path("status")
+                                .asText()
+                        : observed.state();
+        String actualFingerprint =
+                outcome
+                        ? json.sha256(RegressionExpectations.actual(observed.document(), json))
+                        : observed.fingerprint();
         boolean completed =
-                "DATA".equals(observed.kind())
-                        ? Set.of("QUERIED", "EXTRACTED").contains(actual.path("status").asText())
-                        : true;
+                outcome
+                        || !"DATA".equals(observed.kind())
+                        || Set.of("QUERIED", "EXTRACTED").contains(actual.path("status").asText());
         boolean passed =
                 completed
                         && !operation.toString().equals(reference.get("anchor_id"))
-                        && reference.get("scope_hash").equals(observed.scopeHash())
-                        && reference.get("expected_state").equals(observed.state())
-                        && reference.get("expected_fingerprint").equals(observed.fingerprint());
+                        && reference.get("scope_hash").equals(actualScope)
+                        && (outcome
+                                ? RegressionExpectations.matches(
+                                        expectation, observed.document(), json)
+                                : reference.get("expected_state").equals(actualState)
+                                        && reference
+                                                .get("expected_fingerprint")
+                                                .equals(actualFingerprint));
         var proof = new LinkedHashMap<String, Object>();
         proof.put("actualEvidence", sanitized(observed));
         proof.put("caseHash", reference.get("case_hash"));
         proof.put("referenceReviewedBy", reference.get("reviewed_by"));
         proof.put("policyHash", grant.policyHash());
-        proof.put("referenceKind", "REVIEWED_REFERENCE_REGRESSION");
+        proof.put(
+                "referenceKind",
+                outcome ? "REVIEWED_EXPECTED_OUTCOME" : "REVIEWED_REFERENCE_REGRESSION");
+        proof.put("expectation", expectation);
+        if (outcome)
+            proof.put("actualOutcome", RegressionExpectations.actual(observed.document(), json));
         proof.put(
                 "limitations",
                 List.of(
@@ -297,10 +358,10 @@ public class FeedbackService {
                 grant.principal(),
                 key,
                 reference.get("case_hash"),
-                observed.scopeHash(),
+                actualScope,
                 operation,
-                observed.state(),
-                observed.fingerprint(),
+                actualState,
+                actualFingerprint,
                 passed,
                 json.write(proof));
         UUID stored =
@@ -345,6 +406,9 @@ public class FeedbackService {
             throw new IllegalArgumentException(
                     "Closure requires a passing actual replay of the same principal and exact request/model scope");
         var reference = caseRow(UUID.fromString((String) replay.get("case_id")));
+        if (RegressionExpectations.outcome((JsonNode) reference.get("expectation")))
+            throw new IllegalArgumentException(
+                    "An expected refusal/readiness outcome cannot close a data-repair obligation");
         if (reference.get("reviewed_by") == null
                 || !reference.get("case_hash").equals(replay.get("accepted_case_hash")))
             throw new IllegalArgumentException(
@@ -401,15 +465,20 @@ public class FeedbackService {
         return feedback(feedbackId);
     }
 
-    private Evidence evidence(UUID id, ConsumerAccess.Grant grant) {
+    Evidence evidence(UUID id, ConsumerAccess.Grant grant) {
         JsonNode doc;
         String kind;
         try {
             doc = json.parse(json.write(operations.get(id, grant)));
             kind = "DATA";
         } catch (NoSuchElementException notData) {
-            doc = json.parse(json.write(knowledge.observation(id, grant)));
-            kind = "RESOLUTION";
+            try {
+                doc = json.parse(json.write(observations.get(id, grant)));
+                kind = "DATA";
+            } catch (NoSuchElementException notProbe) {
+                doc = json.parse(json.write(knowledge.observation(id, grant)));
+                kind = "RESOLUTION";
+            }
         }
         JsonNode request = doc.path("request");
         if (!request.isObject())
@@ -436,7 +505,11 @@ public class FeedbackService {
         return new Evidence(kind, id, request, doc, scope, state, fingerprint);
     }
 
-    private String scopeHash(String kind, JsonNode request, JsonNode accepted) {
+    String scopeHash(String kind, JsonNode request, JsonNode accepted) {
+        return json.sha256(scopeDocument(kind, request, accepted));
+    }
+
+    JsonNode scopeDocument(String kind, JsonNode request, JsonNode accepted) {
         var scoped = (ObjectNode) request.deepCopy();
         scoped.remove(List.of("idempotencyKey", "externalTaskRef"));
         String policy = accepted.path("policyHash").asText();
@@ -456,6 +529,8 @@ public class FeedbackService {
                 throw new IllegalArgumentException("Accepted policy and model manifest disagree");
             obligation.put("resolved", resolved);
             var projections = new TreeMap<String, String>();
+            String stableProjection =
+                    accepted.path("executionEvidence").path("sourceProjectionRef").asText();
             if (accepted.path("snapshots").isObject())
                 accepted.path("snapshots")
                         .fields()
@@ -463,10 +538,13 @@ public class FeedbackService {
                                 e ->
                                         projections.put(
                                                 e.getKey(),
-                                                physicalProjection(e.getValue().asText())));
+                                                physicalProjection(
+                                                        e.getValue().asText(), stableProjection)));
             if (!accepted.path("data_snapshot_ref").asText().isBlank())
                 projections.put(
-                        "$single", physicalProjection(accepted.path("data_snapshot_ref").asText()));
+                        "$single",
+                        physicalProjection(
+                                accepted.path("data_snapshot_ref").asText(), stableProjection));
             obligation.put("physicalProjections", projections);
             var provider = new LinkedHashMap<String, JsonNode>();
             for (String key :
@@ -479,17 +557,24 @@ public class FeedbackService {
                     provider.put(key, accepted.path("executionEvidence").get(key));
             obligation.put("provider", provider);
         }
-        return json.sha256(json.parse(json.write(obligation)));
+        return json.parse(json.write(obligation));
     }
 
-    private String physicalProjection(String reference) {
+    private String physicalProjection(String reference, String stableProjection) {
         if (reference.matches("postgresql:binding:[a-f0-9]{64}:tx_snapshot_sha256:[a-f0-9]{64}"))
             return reference.substring(0, reference.indexOf(":tx_snapshot_sha256:"));
+        if (!stableProjection.isBlank())
+            return "registered-provider-projection:" + stableProjection;
         // 未声明稳定投影身份的 opaque snapshot 不做猜测性截断；不同句柄需要明确受审适配。
         return reference;
     }
 
-    private String storedScope(String kind, UUID id, String principal) {
+    String storedScope(String kind, UUID id, String principal) {
+        JsonNode document = storedDocument(kind, id, principal);
+        return scopeHash(kind, document.path("request"), document);
+    }
+
+    JsonNode storedDocument(String kind, UUID id, String principal) {
         if (kind.equals("RESOLUTION")) {
             var rows =
                     db.queryForList(
@@ -499,28 +584,56 @@ public class FeedbackService {
             if (rows.isEmpty())
                 throw new IllegalArgumentException(
                         "Resolution proof is outside the closure principal scope");
-            var document = (ObjectNode) json.parse((String) rows.getFirst().get("report"));
-            document.put("policyHash", (String) rows.getFirst().get("policy_hash"));
-            return scopeHash(
-                    kind, json.parse((String) rows.getFirst().get("request_doc")), document);
+            var row = rows.getFirst();
+            var document = (ObjectNode) json.parse((String) row.get("report"));
+            document.put("policyHash", (String) row.get("policy_hash"));
+            document.set("request", json.parse((String) row.get("request_doc")));
+            return document;
         }
-        var matches = new ArrayList<Map<String, Object>>();
+        var matches = new ArrayList<JsonNode>();
         for (String table : List.of("awe_data_task", "awe_metric_task"))
-            matches.addAll(
+            for (var row :
                     db.queryForList(
                             "SELECT request_doc::text,resolved::text,policy_hash,report::text FROM "
                                     + table
                                     + " WHERE id=? AND principal=?",
                             id,
-                            principal));
+                            principal)) {
+                var document = (ObjectNode) json.parse((String) row.get("report"));
+                document.put("policyHash", (String) row.get("policy_hash"));
+                document.set("request", json.parse((String) row.get("request_doc")));
+                document.set("resolved", json.parse((String) row.get("resolved")));
+                matches.add(document);
+            }
+        for (var row :
+                db.queryForList(
+                        "SELECT report::text FROM awe_regression_observation WHERE id=? AND principal=? AND status='OBSERVED'",
+                        id,
+                        principal)) matches.add(json.parse((String) row.get("report")));
         if (matches.size() != 1)
             throw new IllegalArgumentException(
                     "Data proof is missing or has an ambiguous immutable identity");
-        var row = matches.getFirst();
-        var document = (ObjectNode) json.parse((String) row.get("report"));
-        document.put("policyHash", (String) row.get("policy_hash"));
-        document.set("resolved", json.parse((String) row.get("resolved")));
-        return scopeHash(kind, json.parse((String) row.get("request_doc")), document);
+        return matches.getFirst();
+    }
+
+    String outcomeScope(JsonNode request, JsonNode document) {
+        var scoped = (ObjectNode) request.deepCopy();
+        scoped.remove(List.of("idempotencyKey", "externalTaskRef"));
+        String policy = document.path("policyHash").asText();
+        if (!policy.matches("[a-f0-9]{64}") || !document.path("resolved").isObject())
+            throw new IllegalArgumentException("Outcome has no immutable policy/model scope");
+        return json.sha256(
+                json.parse(
+                        json.write(
+                                Map.of(
+                                        "scopeVersion",
+                                        "AWE_OUTCOME_SCOPE_V1",
+                                        "request",
+                                        scoped,
+                                        "policyHash",
+                                        policy,
+                                        "resolved",
+                                        document.path("resolved")))));
     }
 
     public String resolutionFingerprint(JsonNode result) {
@@ -543,7 +656,7 @@ public class FeedbackService {
                                         candidates))));
     }
 
-    private Map<String, Object> sanitized(Evidence evidence) {
+    Map<String, Object> sanitized(Evidence evidence) {
         var result = new LinkedHashMap<String, Object>();
         result.put("id", evidence.id().toString());
         result.put("kind", evidence.kind());
@@ -564,12 +677,15 @@ public class FeedbackService {
                         "data_snapshot_ref",
                         "executionEvidence",
                         "stages",
-                        "indexHash"))
+                        "indexHash",
+                        "outcome",
+                        "probeStatus",
+                        "actualOperationId"))
             if (evidence.document().has(key)) result.put(key, evidence.document().get(key));
         return result;
     }
 
-    private Map<String, Object> feedback(UUID id) {
+    Map<String, Object> feedback(UUID id) {
         var rows =
                 db.queryForList(
                         "SELECT f.id::text,f.principal,f.observation_id::text,f.observation_kind,f.scope_hash,f.issue_code,f.stage,f.reporter_doc::text,f.evidence_snapshot::text,f.created_at,c.replay_id::text AS closed_replay_id,c.reviewed_by AS closed_by,c.classification AS closed_classification,c.closed_at,o.created_at AS last_occurrence_at FROM awe_consumption_feedback f LEFT JOIN LATERAL(SELECT * FROM awe_feedback_closure WHERE feedback_id=f.id ORDER BY closed_at DESC,id DESC LIMIT 1)c ON true LEFT JOIN LATERAL(SELECT created_at FROM awe_feedback_occurrence WHERE feedback_id=f.id ORDER BY created_at DESC LIMIT 1)o ON true WHERE f.id=?",
@@ -583,7 +699,21 @@ public class FeedbackService {
                                         .before(
                                                 (java.sql.Timestamp)
                                                         result.get("last_occurrence_at")));
-        result.put("status", closed ? "TECHNICALLY_CLOSED" : "OPEN");
+        var migrated =
+                db.queryForList(
+                        "SELECT m.id::text AS migration_id,r.replay_id::text,r.resolved_at,r.reviewed_by FROM awe_obligation_migration m JOIN awe_obligation_migration_resolution r ON r.migration_id=m.id WHERE m.feedback_id=? ORDER BY r.resolved_at DESC,r.id DESC LIMIT 1",
+                        id);
+        boolean replacement =
+                !migrated.isEmpty()
+                        && (result.get("last_occurrence_at") == null
+                                || !((java.sql.Timestamp) migrated.getFirst().get("resolved_at"))
+                                        .before(
+                                                (java.sql.Timestamp)
+                                                        result.get("last_occurrence_at")));
+        result.put(
+                "status",
+                closed ? "TECHNICALLY_CLOSED" : replacement ? "RESOLVED_BY_REPLACEMENT" : "OPEN");
+        if (!migrated.isEmpty()) result.put("replacement", migrated.getFirst());
         result.put("closureScope", "AWE_DATA_OR_RESOLUTION_REFERENCE_ONLY");
         result.put("reporter_doc", json.parse((String) result.get("reporter_doc")));
         result.put("evidence_snapshot", json.parse((String) result.get("evidence_snapshot")));
@@ -600,7 +730,7 @@ public class FeedbackService {
         return result;
     }
 
-    private Map<String, Object> caseRow(UUID id) {
+    Map<String, Object> caseRow(UUID id) {
         var rows =
                 db.queryForList(
                         "SELECT c.id::text,c.principal,c.anchor_id::text,c.observation_kind,c.request_doc::text,c.scope_hash,c.case_hash,c.expected_state,c.expected_fingerprint,c.reference_basis,c.reference_evidence_ref,c.proposed_by,c.created_at,a.reviewed_by FROM awe_regression_case c LEFT JOIN awe_regression_case_approval a ON a.case_id=c.id WHERE c.id=?",
@@ -608,10 +738,34 @@ public class FeedbackService {
         if (rows.isEmpty()) throw new NoSuchElementException("Regression case not found");
         var result = new LinkedHashMap<String, Object>(rows.getFirst());
         result.put("request_doc", json.parse((String) result.get("request_doc")));
+        var facets =
+                db.queryForList(
+                        "SELECT expectation::text,expectation_hash FROM awe_regression_expectation WHERE case_id=?",
+                        id);
+        if (facets.isEmpty()) {
+            result.put("expectationFormat", "LEGACY_V1");
+            result.put(
+                    "expectation",
+                    json.parse(
+                            json.write(
+                                    Map.of(
+                                            "type",
+                                            result.get("observation_kind").equals("DATA")
+                                                    ? "DATA_RESULT"
+                                                    : "RESOLUTION",
+                                            "state",
+                                            result.get("expected_state"),
+                                            "fingerprint",
+                                            result.get("expected_fingerprint")))));
+        } else {
+            result.put("expectationFormat", "TYPED_V2");
+            result.put("expectation", json.parse((String) facets.getFirst().get("expectation")));
+            result.put("expectationHash", facets.getFirst().get("expectation_hash"));
+        }
         return result;
     }
 
-    private Map<String, Object> replayRow(UUID id) {
+    Map<String, Object> replayRow(UUID id) {
         var rows =
                 db.queryForList(
                         "SELECT id::text,case_id::text,principal,accepted_case_hash,scope_hash,actual_observation_id::text,actual_state,actual_fingerprint,passed,proof::text,created_at FROM awe_regression_replay WHERE id=?",

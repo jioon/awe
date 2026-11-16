@@ -305,6 +305,9 @@ final class SqlBackedMetricGateway implements AutoCloseable {
                                                         "runRef",
                                                         run),
                                         "result", Map.of("state", resultState, "rows", rows))));
+        if (request.has("sourceProjectionRef"))
+            ((ObjectNode) response.path("readiness"))
+                    .set("sourceProjectionRef", request.path("sourceProjectionRef"));
         return response;
     }
 
