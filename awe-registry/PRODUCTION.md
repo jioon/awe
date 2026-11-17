@@ -20,7 +20,7 @@ AWE 校验加工意图、制品、影响和回归，并提供在线一次性部�
 }
 ```
 
-该片段仅说明 facet 结构；完整 Schema/粒度/Contract 与绑定必须共同通过 Registry 校验。运行样本见 [ProductionAdmissionIntegrationTest](src/test/java/ai/awe/registry/ProductionAdmissionIntegrationTest.java)。Pipeline 输出只能指向明确逻辑目标，类型和实际产出必须遵循行 Schema。REGISTERED_EXTERNAL 是保留声明边界，当前准入只认证 MODEL_COMPILED 制品，不认证任意脚本的语义等价。
+该片段仅说明 facet 结构；完整 Schema/粒度/Contract 与绑定必须共同通过 Registry 校验。运行样本见 [ProductionAdmissionIntegrationTest](src/test/java/ai/awe/registry/ProductionAdmissionIntegrationTest.java)。Pipeline 输出只能指向明确逻辑目标，类型和实际产出必须遵循行 Schema。MODEL_COMPILED 严格核对规范制品；REGISTERED_EXTERNAL 现支持管理员固定真实 SQL 字节、只读隔离和具名有限回归的准入，详见 [存量 SQL 准入](EXTERNAL-ARTIFACTS.md)，不认证任意脚本的普遍语义等价。
 
 `GET /api/production/plans/{pipelineReleaseId}?contentHash=<hash>` 返回 `AWE_PIPELINE_PLAN_V1` 规范制品及其 Hash，含确切输入、目标、Contract 和依赖发布。平台应实际保存/编译这些字节；不能把任意代码贴上相同 Hash。候选和独立参考的计算仍在平台执行。
 

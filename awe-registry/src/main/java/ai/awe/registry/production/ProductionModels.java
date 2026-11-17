@@ -24,10 +24,30 @@ public final class ProductionModels {
             JsonNode artifact,
             String artifactHash,
             List<Map<String, Object>> dependencies,
-            List<Target> targets) {
+            List<Target> targets,
+            Optional<ProductionExternalArtifacts.Artifact> externalArtifact) {
         public Plan {
             dependencies = List.copyOf(dependencies);
             targets = List.copyOf(targets);
+            externalArtifact = Objects.requireNonNull(externalArtifact);
+        }
+
+        public boolean external() {
+            return contract.mode() == PipelineContract.Mode.REGISTERED_EXTERNAL;
+        }
+
+        public String candidateHash() {
+            return external()
+                    ? externalArtifact
+                            .map(ProductionExternalArtifacts.Artifact::contentHash)
+                            .orElse("")
+                    : artifactHash;
+        }
+
+        public String proofScope() {
+            return external()
+                    ? ProductionExternalArtifacts.PROOF_SCOPE
+                    : "REGISTERED_MODEL_COMPILED_ARTIFACT_AND_PINNED_REGRESSION_SUITE";
         }
     }
 
@@ -39,16 +59,19 @@ public final class ProductionModels {
     private final ProductionTargets targets;
     private final ObjectProvider<LogicalDatasetBindings> logicalBindings;
     private final TypedModels typed = new TypedModels();
+    private final ProductionExternalArtifacts externalArtifacts;
 
     public ProductionModels(
             ModelRegistry registry,
             JsonDocuments json,
             ProductionTargets targets,
-            ObjectProvider<LogicalDatasetBindings> logicalBindings) {
+            ObjectProvider<LogicalDatasetBindings> logicalBindings,
+            ProductionExternalArtifacts externalArtifacts) {
         this.registry = registry;
         this.json = json;
         this.targets = targets;
         this.logicalBindings = logicalBindings;
+        this.externalArtifacts = externalArtifacts;
     }
 
     public Plan plan(UUID id, String hash) {
@@ -62,10 +85,25 @@ public final class ProductionModels {
             throw new IllegalArgumentException(
                     "Production candidate requires a v3 Pipeline contract");
         PipelineContract contract = typed.pipelineContract(spec);
-        if (contract.mode() != PipelineContract.Mode.MODEL_COMPILED)
-            throw new IllegalArgumentException(
-                    "REGISTERED_EXTERNAL code has no supported universal-equivalence checker; model-compiled plans are required for this admission profile");
         var dependencies = closure(pipeline);
+        if (contract.mode() == PipelineContract.Mode.REGISTERED_EXTERNAL) {
+            // 首个外部执行 profile 只接受无参静态快照；行/时间受限读能力须先实现源端隔离。
+            for (var source : contract.sources()) {
+                var read = dependency(pipeline, source.readFunction(), "FunctionDefinition");
+                var function =
+                        (FunctionDefinition)
+                                typed.decode("FunctionDefinition", (JsonNode) read.get("spec"));
+                var dataset = dependency(read, function.ownerType(), "Dataset");
+                if (!function.operation().equals("dataset.snapshot.v1")
+                        || !function.executorBindingRef().equals("postgres.dataset.snapshot.v1")
+                        || !function.parameters().isEmpty()
+                        || !function.requiredAssertions().isEmpty()
+                        || typed.datasetContract((JsonNode) dataset.get("spec")).readMode()
+                                != DatasetContract.ReadMode.STATIC_SNAPSHOT)
+                    throw new IllegalArgumentException(
+                            "The external read-only profile currently supports only parameter-free PostgreSQL STATIC_SNAPSHOT capabilities; temporal or row-constrained capabilities require a separately implemented enforced profile");
+            }
+        }
         var resolvedTargets = new ArrayList<Target>();
         for (var target : contract.targets()) {
             var dataset = dependency(pipeline, target.dataset(), "Dataset");
@@ -94,7 +132,21 @@ public final class ProductionModels {
                                                 .map(ProductionModels::pointer)
                                                 .toList())));
         return new Plan(
-                pipeline, contract, artifact, json.sha256(artifact), dependencies, resolvedTargets);
+                pipeline,
+                contract,
+                artifact,
+                json.sha256(artifact),
+                dependencies,
+                resolvedTargets,
+                contract.mode() == PipelineContract.Mode.REGISTERED_EXTERNAL
+                        ? externalArtifacts.find(
+                                (String) pipeline.get("entity_id"),
+                                (String) pipeline.get("version"))
+                        : Optional.empty());
+    }
+
+    public String externalArtifactConfigurationHash() {
+        return externalArtifacts.configurationHash();
     }
 
     public Map<String, Object> release(UUID id, String hash) {

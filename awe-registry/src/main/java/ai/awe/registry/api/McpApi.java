@@ -106,12 +106,18 @@ public final class McpApi {
                                 }
                                 case "awe_resolve" -> knowledge.resolve(arguments, grant);
                                 case "awe_assess" -> knowledge.assess(arguments, grant);
+                                case "awe_plan_requirements" ->
+                                        operations.assessRequirements(arguments, grant);
                                 case "awe_query_metric" -> {
-                                    if (arguments.path("protocolVersion").asInt() != 2
+                                    if (!Set.of(2, 3)
+                                                    .contains(
+                                                            arguments
+                                                                    .path("protocolVersion")
+                                                                    .asInt())
                                             || !"QUERY_METRIC"
                                                     .equals(arguments.path("intent").asText()))
                                         throw new IllegalArgumentException(
-                                                "This tool requires a QUERY_METRIC v2 request");
+                                                "This tool requires a QUERY_METRIC v2 or v3 request");
                                     yield operations.create(
                                             arguments, grant, KnowledgeHttp.identity(request));
                                 }
@@ -234,12 +240,38 @@ public final class McpApi {
                         "consumer",
                         "constraints",
                         "idempotencyKey");
+        var queryTask = new LinkedHashMap<String, Object>(task);
+        queryTask.put("metric", Map.of("type", "object"));
+        queryTask.put("candidateFunction", Map.of("type", "object"));
+        var queryRequired =
+                List.of(
+                        "protocolVersion",
+                        "intent",
+                        "requirements",
+                        "consumer",
+                        "constraints",
+                        "idempotencyKey");
+        var semanticTask = new LinkedHashMap<String, Object>(queryTask);
+        semanticTask.remove("proposedFunction");
+        tools.add(
+                tool(
+                        "awe_plan_requirements",
+                        "Assess structured metric, subject, dimension, filter and time requirements; derive a bounded legal plan or return ambiguity/unsupported/undisclosed without claiming source readiness",
+                        semanticTask,
+                        List.of(
+                                "protocolVersion",
+                                "intent",
+                                "metric",
+                                "requirements",
+                                "consumer",
+                                "constraints",
+                                "idempotencyKey")));
         tools.add(
                 tool(
                         "awe_query_metric",
-                        "Execute one published QUERY_METRIC v2 under the same authorization, plan and evidence gates",
-                        task,
-                        required));
+                        "Execute QUERY_METRIC v2 or structured v3 under the same server planning, authorization and evidence gates",
+                        queryTask,
+                        queryRequired));
         tools.add(
                 tool(
                         "awe_extract_dataset",
@@ -270,8 +302,8 @@ public final class McpApi {
                 tool(
                         "awe_validate_plan",
                         "Validate the server-resolved published metric plan, without granting execution by caller assertion",
-                        task,
-                        required));
+                        queryTask,
+                        queryRequired));
         return tools;
     }
 

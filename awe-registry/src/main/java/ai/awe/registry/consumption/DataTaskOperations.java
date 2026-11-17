@@ -21,7 +21,8 @@ public final class DataTaskOperations {
     public Map<String, Object> create(
             JsonNode body, ConsumerAccess.Grant grant, Map<String, Object> identity) {
         if (body.path("protocolVersion").isIntegralNumber()
-                && body.path("protocolVersion").intValue() == 2)
+                && body.path("protocolVersion").canConvertToInt()
+                && Set.of(2, 3).contains(body.path("protocolVersion").intValue()))
             return metrics.create(body, grant, identity);
         return extraction.create(body, grant);
     }
@@ -52,6 +53,14 @@ public final class DataTaskOperations {
 
     public Map<String, Object> validatePlan(JsonNode request, ConsumerAccess.Grant grant) {
         return metrics.validatePlan(request, grant);
+    }
+
+    public Map<String, Object> assessRequirements(JsonNode request, ConsumerAccess.Grant grant) {
+        return metrics.assessRequirements(request, grant);
+    }
+
+    public Map<String, Object> requirementAssessment(UUID id, ConsumerAccess.Grant grant) {
+        return metrics.requirementAssessment(id, grant);
     }
 
     private static long created(Map<String, Object> row) {

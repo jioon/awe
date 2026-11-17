@@ -1,5 +1,6 @@
 package ai.awe.registry.consumption.query;
 
+import ai.awe.kernel.capability.DataTask;
 import ai.awe.kernel.contract.*;
 import ai.awe.kernel.identity.EntityRef;
 import ai.awe.kernel.model.*;
@@ -155,16 +156,43 @@ public final class MetricQueryService {
 
     public Map<String, Object> create(
             JsonNode body, ConsumerAccess.Grant grant, Map<String, Object> trustedIdentity) {
+        if (body.path("protocolVersion").asInt() == 3) {
+            var semantic = SemanticMetricRequest.decode(body);
+            var planning = semanticPlanning(semantic, grant);
+            if (!"PLANNED".equals(planningStatus(planning)))
+                throw new IllegalArgumentException(
+                        "Semantic requirements are " + planningStatus(planning));
+            var resolved = planning.candidates().getFirst();
+            return create(
+                    semantic.withFunction(functionPointer(resolved)),
+                    semantic.normalized(json),
+                    resolved,
+                    semantic,
+                    grant,
+                    trustedIdentity);
+        }
         MetricQueryRequest request = MetricQueryRequest.decode(body);
         Resolved resolved =
                 resolve(
                         request.proposedFunction().releaseId(),
                         request.proposedFunction().contentHash(),
                         grant);
+        return create(request, request.normalized(json), resolved, null, grant, trustedIdentity);
+    }
+
+    private Map<String, Object> create(
+            MetricQueryRequest request,
+            ObjectNode accepted,
+            Resolved resolved,
+            SemanticMetricRequest semantic,
+            ConsumerAccess.Grant grant,
+            Map<String, Object> trustedIdentity) {
         Map<String, RelationalIR.Predicate> scopes = authorize(request, resolved, grant);
-        var accepted = request.normalized(json);
         String requestHash = json.sha256(accepted);
-        var manifest = manifest(resolved, request, grant, scopes);
+        var manifest =
+                semantic == null
+                        ? manifest(resolved, request, grant, scopes)
+                        : semanticManifest(resolved, semantic, grant, scopes);
         UUID id = UUID.randomUUID();
         int inserted =
                 db.update(
@@ -204,7 +232,9 @@ public final class MetricQueryService {
                 stages,
                 "PLANNING",
                 "VALIDATED",
-                "Only the published typed plan is accepted; client plan substitution is not supported");
+                semantic == null
+                        ? "Only the published typed plan is accepted; client plan substitution is not supported"
+                        : "A bounded server derivation preserves the published statistical measure and business input; caller SQL or IR is not accepted");
         var limitations = new ArrayList<String>();
         limitations.add(
                 "Evidence is limited to the exact published semantics, implementation, requested window and observed source snapshots; it does not certify the Agent's overall task or every explanation");
@@ -500,15 +530,30 @@ public final class MetricQueryService {
             throw new NoSuchElementException(
                     "Metric operation not found in current authorized scope");
         JsonNode manifest = json.parse((String) stored.get("resolved"));
-        var request = MetricQueryRequest.decode(json.parse((String) stored.get("request_doc")));
         try {
-            authorize(
-                    request,
-                    resolve(
-                            request.proposedFunction().releaseId(),
-                            request.proposedFunction().contentHash(),
-                            grant),
-                    grant);
+            JsonNode accepted = json.parse((String) stored.get("request_doc"));
+            if (accepted.path("protocolVersion").asInt() == 3) {
+                var semantic = SemanticMetricRequest.decode(accepted);
+                // 历史读取按服务端保存的实现复核授权，不因目录中新添候选而改写旧的选择。
+                var fixed =
+                        new DataTask.ProposedFunction(
+                                UUID.fromString(
+                                        manifest.path("function").path("releaseId").asText()),
+                                manifest.path("function").path("contentHash").asText());
+                var current =
+                        semanticResolved(
+                                semantic, resolve(fixed.releaseId(), fixed.contentHash(), grant));
+                authorize(semantic.withFunction(fixed), current, grant);
+            } else {
+                var request = MetricQueryRequest.decode(accepted);
+                authorize(
+                        request,
+                        resolve(
+                                request.proposedFunction().releaseId(),
+                                request.proposedFunction().contentHash(),
+                                grant),
+                        grant);
+            }
         } catch (IllegalArgumentException
                 | NoSuchElementException
                 | ResponseStatusException denied) {
@@ -583,6 +628,7 @@ public final class MetricQueryService {
     }
 
     public Map<String, Object> validatePlan(JsonNode body, ConsumerAccess.Grant grant) {
+        if (body.path("protocolVersion").asInt() == 3) return assessRequirements(body, grant);
         // 验证也固定正式指标，不以用户自拟计划偷偷更换业务口径。
         var request = MetricQueryRequest.decode(body);
         var resolved =
@@ -602,6 +648,271 @@ public final class MetricQueryService {
                 "limitations",
                 List.of(
                         "Static model and policy validation is not execution permission or current source/period readiness evidence"));
+    }
+
+    private record SemanticPlanning(
+            SemanticMetricRequest request,
+            List<Resolved> candidates,
+            List<Map<String, Object>> diagnostics,
+            boolean visibleMetric,
+            boolean catalogComplete) {}
+
+    /** 静态能力裁决只证明模型与当前政策允许的计划，不访问数据或宣称账期已就绪。 */
+    public Map<String, Object> assessRequirements(JsonNode body, ConsumerAccess.Grant grant) {
+        var semantic = SemanticMetricRequest.decode(body);
+        var planning = semanticPlanning(semantic, grant);
+        var result = new LinkedHashMap<String, Object>();
+        UUID id = UUID.randomUUID();
+        String status = planningStatus(planning);
+        result.put("id", id.toString());
+        result.put("status", status);
+        result.put(
+                "resolution",
+                status.equals("PLANNED")
+                        ? "RESOLVED"
+                        : status.equals("AMBIGUOUS") ? "AMBIGUOUS" : "UNRESOLVED");
+        result.put("policyHash", grant.policyHash());
+        result.put("request", semantic.normalized(json));
+        result.put("catalogComplete", planning.catalogComplete());
+        result.put(
+                "candidates",
+                planning.candidates().stream()
+                        .map(
+                                r ->
+                                        Map.<String, Object>of(
+                                                "functionId", r.function().ref().id(),
+                                                "releaseId", r.functionRelease().get("id"),
+                                                "contentHash",
+                                                        r.functionRelease().get("content_hash"),
+                                                "supply", supply(r)))
+                        .toList());
+        result.put("diagnostics", planning.diagnostics());
+        result.put(
+                "decision",
+                Map.of(
+                        "resolution",
+                        result.get("resolution"),
+                        "authorization",
+                        planning.candidates().isEmpty() ? "NOT_EVALUATED" : "ALLOWED",
+                        "supply",
+                        status.equals("PLANNED")
+                                ? supply(planning.candidates().getFirst())
+                                : "UNKNOWN",
+                        "readiness",
+                        "UNKNOWN"));
+        if (status.equals("PLANNED")) {
+            var r = planning.candidates().getFirst();
+            var req = semantic.withFunction(functionPointer(r));
+            result.put("resolved", semanticManifest(r, semantic, grant, authorize(req, r, grant)));
+        }
+        result.put(
+                "limitations",
+                List.of(
+                        "Static planning is not source readiness, numerical verification or execution permission; execution rechecks current gates",
+                        "Only registered authorized implementations and bounded declared dimension derivations are considered; an unsupported or undisclosed result is not enterprise absence",
+                        "Dimension and measure list order does not require result column order; statistical meaning and explicit names determine the contract"));
+        String indexHash =
+                json.sha256(
+                        json.parse(
+                                json.write(
+                                        Map.of(
+                                                "candidates",
+                                                result.get("candidates"),
+                                                "diagnostics",
+                                                planning.diagnostics(),
+                                                "catalogComplete",
+                                                planning.catalogComplete()))));
+        result.put("indexHash", indexHash);
+        db.update(
+                "INSERT INTO awe_resolution_observation(id,principal,policy_hash,request_doc,index_hash,report) VALUES(?,?,?,?::jsonb,?,?::jsonb)",
+                id,
+                grant.principal(),
+                grant.policyHash(),
+                json.canonical(semantic.normalized(json)),
+                indexHash,
+                json.write(result));
+        return result;
+    }
+
+    public Map<String, Object> requirementAssessment(UUID id, ConsumerAccess.Grant grant) {
+        access.requireCurrent(grant);
+        var rows =
+                db.queryForList(
+                        "SELECT request_doc::text,report::text FROM awe_resolution_observation WHERE id=? AND principal=? AND policy_hash=?",
+                        id,
+                        grant.principal(),
+                        grant.policyHash());
+        if (rows.isEmpty()) throw new NoSuchElementException("Requirement assessment not found");
+        JsonNode request = json.parse((String) rows.getFirst().get("request_doc"));
+        if (request.path("protocolVersion").asInt() != 3)
+            throw new NoSuchElementException("Requirement assessment not found");
+        var semantic = SemanticMetricRequest.decode(request);
+        var report = json.parse((String) rows.getFirst().get("report"));
+        try {
+            for (var candidate : report.path("candidates")) {
+                var fixed =
+                        new DataTask.ProposedFunction(
+                                UUID.fromString(candidate.path("releaseId").asText()),
+                                candidate.path("contentHash").asText());
+                var r =
+                        semanticResolved(
+                                semantic, resolve(fixed.releaseId(), fixed.contentHash(), grant));
+                authorize(semantic.withFunction(fixed), r, grant);
+            }
+        } catch (IllegalArgumentException
+                | NoSuchElementException
+                | ResponseStatusException revoked) {
+            throw new NoSuchElementException(
+                    "Requirement assessment not found in current authorized scope");
+        }
+        var result = new LinkedHashMap<String, Object>();
+        report.fields().forEachRemaining(e -> result.put(e.getKey(), e.getValue()));
+        return result;
+    }
+
+    private String planningStatus(SemanticPlanning p) {
+        if (!p.catalogComplete()) return "UNSUPPORTED";
+        if (p.candidates().size() > 1) return "AMBIGUOUS";
+        if (p.candidates().size() == 1) return "PLANNED";
+        return p.visibleMetric() ? "UNSUPPORTED" : "NOT_DISCLOSED";
+    }
+
+    private SemanticPlanning semanticPlanning(
+            SemanticMetricRequest request, ConsumerAccess.Grant grant) {
+        access.requireCurrent(grant);
+        List<UUID> ids;
+        if (request.candidateFunction().isPresent())
+            ids = List.of(request.candidateFunction().get().releaseId());
+        else if (grant.functionIds().isEmpty()) ids = List.of();
+        else {
+            var args = new ArrayList<Object>(grant.functionIds());
+            args.add(request.metric().releaseId());
+            // 多取一条识别截断；目录不完整时不得将“首条匹配”当成唯一正式实现。
+            ids =
+                    db
+                            .queryForList(
+                                    "SELECT r.id::text FROM awe_release r WHERE r.entity_type='FunctionDefinition' AND r.entity_id IN ("
+                                            + String.join(
+                                                    ",",
+                                                    Collections.nCopies(
+                                                            grant.functionIds().size(), "?"))
+                                            + ") AND EXISTS (SELECT 1 FROM awe_release_relation dep WHERE dep.release_id=r.id AND dep.target_release_id=?) ORDER BY r.id LIMIT 257",
+                                    args.toArray())
+                            .stream()
+                            .map(r -> UUID.fromString((String) r.get("id")))
+                            .toList();
+            if (ids.size() > 256)
+                return new SemanticPlanning(
+                        request,
+                        List.of(),
+                        List.of(Map.of("reason", "CANDIDATE_BUDGET_EXCEEDED")),
+                        false,
+                        false);
+        }
+        var candidates = new ArrayList<Resolved>();
+        var diagnostics = new ArrayList<Map<String, Object>>();
+        boolean visible = false;
+        for (UUID id : ids) {
+            Resolved base;
+            try {
+                base = resolve(id, null, grant);
+            } catch (NoSuchElementException
+                    | IllegalArgumentException
+                    | ResponseStatusException unavailable) {
+                continue;
+            }
+            if (!request.metric().releaseId().toString().equals(base.metricRelease().get("id")))
+                continue;
+            visible = true;
+            if (!request.metric().contentHash().equals(base.metricRelease().get("content_hash")))
+                throw new IllegalArgumentException("Metric Hash does not match pinned release");
+            if (request.candidateFunction().isPresent()
+                    && !request.candidateFunction()
+                            .get()
+                            .contentHash()
+                            .equals(base.functionRelease().get("content_hash")))
+                throw new IllegalArgumentException(
+                        "Candidate Function Hash does not match pinned release");
+            try {
+                var derived = semanticResolved(request, base);
+                for (var filter : request.filters())
+                    if (!grant.fields().contains(filter.field()))
+                        throw new ResponseStatusException(
+                                HttpStatus.FORBIDDEN,
+                                "Dimension filter is outside the current data policy");
+                authorize(request.withFunction(functionPointer(derived)), derived, grant);
+                candidates.add(derived);
+            } catch (MetricDerivation.UnsupportedDerivation unsupported) {
+                diagnostics.add(
+                        Map.of(
+                                "functionId",
+                                base.function().ref().id(),
+                                "releaseId",
+                                id.toString(),
+                                "reason",
+                                unsupported.reason()));
+            }
+        }
+        return new SemanticPlanning(
+                request, List.copyOf(candidates), List.copyOf(diagnostics), visible, true);
+    }
+
+    private Resolved semanticResolved(SemanticMetricRequest request, Resolved base) {
+        if (!request.metric().releaseId().toString().equals(base.metricRelease().get("id"))
+                || !request.metric().contentHash().equals(base.metricRelease().get("content_hash")))
+            throw new IllegalArgumentException(
+                    "Implementation does not bind the requested immutable Metric");
+        var contract = MetricDerivation.derive(base.contract(), request);
+        if (!isPostgres(base)
+                && !json.canonical(typed.encodeValue(contract))
+                        .equals(json.canonical(typed.encodeValue(base.contract()))))
+            throw new MetricDerivation.UnsupportedDerivation(
+                    "EXTERNAL_DERIVATION_NOT_REGISTERED",
+                    "The registered BI implementation does not declare a generic derivation capability");
+        var resolved =
+                new Resolved(
+                        base.functionRelease(),
+                        base.metricRelease(),
+                        base.subjectRelease(),
+                        base.function(),
+                        base.metric(),
+                        contract,
+                        base.sources(),
+                        base.sourceManifest(),
+                        base.links());
+        SemanticPlanTypes.validate(contract, schemas(resolved));
+        return resolved;
+    }
+
+    private DataTask.ProposedFunction functionPointer(Resolved r) {
+        return new DataTask.ProposedFunction(
+                UUID.fromString((String) r.functionRelease().get("id")),
+                (String) r.functionRelease().get("content_hash"));
+    }
+
+    private Map<String, Object> semanticManifest(
+            Resolved resolved,
+            SemanticMetricRequest semantic,
+            ConsumerAccess.Grant grant,
+            Map<String, RelationalIR.Predicate> scopes) {
+        var manifest =
+                manifest(resolved, semantic.withFunction(functionPointer(resolved)), grant, scopes);
+        var scoped = semantic.normalized(json);
+        scoped.remove(List.of("idempotencyKey", "externalTaskRef"));
+        var baseContract = typed.metricContract((JsonNode) resolved.metricRelease().get("spec"));
+        manifest.remove("planHash");
+        manifest.put("semanticRequirements", scoped.path("requirements"));
+        manifest.put(
+                "derivation",
+                Map.of(
+                        "algorithm",
+                        "AWE_METRIC_DERIVATION_V1",
+                        "baseContractHash",
+                        json.sha256(typed.encodeValue(baseContract)),
+                        "requirementsHash",
+                        json.sha256(scoped)));
+        manifest.put("planHash", json.sha256(json.object(json.write(manifest))));
+        return manifest;
     }
 
     private Map<String, RelationalIR.Predicate> authorize(
@@ -851,23 +1162,32 @@ public final class MetricQueryService {
                                             source.contentHash());
                                 })
                         .toList();
-        return Map.of(
-                "operationId",
-                id.toString(),
-                "metric",
-                pointer(resolved.metricRelease()),
-                "planHash",
-                manifest.get("planHash"),
-                "principal",
-                grant.principal(),
-                "purpose",
-                request.purpose(),
-                "policyHash",
-                grant.policyHash(),
-                "scopeHash",
-                json.sha256((JsonNode) manifest.get("rowScope")),
-                "scanWindows",
-                windows);
+        var context =
+                new LinkedHashMap<String, Object>(
+                        Map.of(
+                                "operationId",
+                                id.toString(),
+                                "metric",
+                                pointer(resolved.metricRelease()),
+                                "planHash",
+                                manifest.get("planHash"),
+                                "principal",
+                                grant.principal(),
+                                "purpose",
+                                request.purpose(),
+                                "policyHash",
+                                grant.policyHash(),
+                                "scopeHash",
+                                json.sha256((JsonNode) manifest.get("rowScope")),
+                                "scanWindows",
+                                windows));
+        if (manifest.containsKey("derivation")) {
+            // 独立验证器必须知道被验的正式需求与派生范围，不能按原固定粒度误验新计划。
+            context.put("semanticRequirements", manifest.get("semanticRequirements"));
+            context.put("derivation", manifest.get("derivation"));
+            context.put("derivedContract", manifest.get("contract"));
+        }
+        return context;
     }
 
     private ObjectNode scopeDocument(Map<String, RelationalIR.Predicate> scopes) {

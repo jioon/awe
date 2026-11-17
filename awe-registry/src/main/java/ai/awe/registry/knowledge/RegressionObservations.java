@@ -2,6 +2,7 @@ package ai.awe.registry.knowledge;
 
 import ai.awe.registry.consumption.*;
 import ai.awe.registry.consumption.query.MetricQueryRequest;
+import ai.awe.registry.consumption.query.SemanticMetricRequest;
 import ai.awe.registry.support.JsonDocuments;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -54,9 +55,12 @@ public class RegressionObservations {
         if (json.write(candidate).getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 65536)
             throw new IllegalArgumentException("Observation request exceeds 64 KiB");
         ObjectNode request =
-                candidate.path("protocolVersion").asInt() == 2
-                        ? MetricQueryRequest.decode(candidate).normalized(json)
-                        : DataTaskRequests.normalized(DataTaskRequests.decode(candidate), json);
+                candidate.path("protocolVersion").asInt() == 3
+                        ? SemanticMetricRequest.decode(candidate).normalized(json)
+                        : candidate.path("protocolVersion").asInt() == 2
+                                ? MetricQueryRequest.decode(candidate).normalized(json)
+                                : DataTaskRequests.normalized(
+                                        DataTaskRequests.decode(candidate), json);
         String hash = json.sha256(request);
         UUID id = UUID.randomUUID();
         int inserted =

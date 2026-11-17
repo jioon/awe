@@ -1,8 +1,10 @@
 package ai.awe.registry.production;
 
+import ai.awe.registry.model.TypedModels;
 import ai.awe.registry.source.SourceService;
 import ai.awe.registry.support.JsonDocuments;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.*;
@@ -75,21 +77,32 @@ public final class ProductionAdmissionService {
 
     public Map<String, Object> plan(UUID id, String hash) {
         var plan = models.plan(id, hash);
-        return Map.of(
-                "pipeline",
-                ProductionModels.pointer(plan.pipeline()),
-                "format",
-                ProductionModels.ARTIFACT_FORMAT,
-                "artifact",
-                plan.artifact(),
-                "content",
-                json.canonical(plan.artifact()),
-                "contentHash",
-                plan.artifactHash(),
-                "limitations",
-                List.of(
-                        "This is a typed data-transformation artifact, not an arbitrary SQL/code workspace or deployment workflow",
-                        "Actual platform execution and independent regression remain required"));
+        var response =
+                new LinkedHashMap<String, Object>(
+                        Map.of(
+                                "pipeline",
+                                ProductionModels.pointer(plan.pipeline()),
+                                "format",
+                                ProductionModels.ARTIFACT_FORMAT,
+                                "artifact",
+                                plan.artifact(),
+                                "content",
+                                json.canonical(plan.artifact()),
+                                "contentHash",
+                                plan.artifactHash(),
+                                "limitations",
+                                List.of(
+                                        "This is a typed data-transformation artifact, not an arbitrary SQL/code workspace or deployment workflow",
+                                        "Actual platform execution and independent regression remain required")));
+        if (plan.external()) {
+            response.put(
+                    "externalCandidate",
+                    plan.externalArtifact()
+                            .map(a -> (Object) a.descriptor())
+                            .orElse(Map.of("status", "NOT_CONFIGURED")));
+            response.put("proofScope", plan.proofScope());
+        }
+        return response;
     }
 
     public Map<String, Object> prepare(JsonNode body, String actor) {
@@ -142,6 +155,10 @@ public final class ProductionAdmissionService {
         String status = "PREPARED";
         JsonNode baseline = json.object("{}");
         try {
+            if (plan.external() && plan.externalArtifact().isEmpty())
+                throw new Failure(
+                        "NOT_CONFIGURED",
+                        "An exact external artifact and finite regression scope must be registered for this immutable Pipeline version");
             if (suite.isEmpty())
                 throw new Failure(
                         "NOT_CONFIGURED",
@@ -206,8 +223,8 @@ public final class ProductionAdmissionService {
                         plan.pipeline().get("entity_id"),
                         environment,
                         artifact,
-                        plan.artifactHash(),
-                        json.canonical(plan.artifact()),
+                        plan.candidateHash(),
+                        json.canonical(proposalArtifact(plan)),
                         json.write(verification),
                         impact.hash(),
                         json.write(baseline),
@@ -322,9 +339,8 @@ public final class ProductionAdmissionService {
                     receipt.put("approvedBy", actor);
                     receipt.put("approvedAt", now.toString());
                     receipt.put("expiresAt", expires.toString());
-                    receipt.put(
-                            "proofScope",
-                            "REGISTERED_MODEL_COMPILED_ARTIFACT_AND_PINNED_REGRESSION_SUITE");
+                    receipt.put("proofScope", current.plan().proofScope());
+                    addExternalScope(receipt, current.plan());
                     receipt.put(
                             "deploymentRequirement",
                             "Online one-time consume followed by platform CAS on expectedBaselineRevision; receipt hash alone is not authority");
@@ -461,6 +477,8 @@ public final class ProductionAdmissionService {
                     authorization.put("platformPolicyHash", grant.policyHash());
                     authorization.put("state", "CONSUMED");
                     authorization.put("deploymentState", "NOT_OBSERVED");
+                    authorization.put("proofScope", current.plan().proofScope());
+                    addExternalScope(authorization, current.plan());
                     authorization.put(
                             "requirements",
                             List.of(
@@ -567,7 +585,7 @@ public final class ProductionAdmissionService {
                         (String) proposal.get("pipeline_content_hash"));
         var impact = impact(plan);
         if (!impact.hash().equals(proposal.get("impact_hash"))
-                || !plan.artifactHash().equals(proposal.get("expected_artifact_hash")))
+                || !plan.candidateHash().equals(proposal.get("expected_artifact_hash")))
             throw new Failure("STALE", "Candidate artifact or complete production impact changed");
         var suite =
                 suites.find((String) proposal.get("pipeline_entity_id"))
@@ -626,11 +644,19 @@ public final class ProductionAdmissionService {
                                                     "pipeline",
                                                     ProductionModels.pointer(plan.pipeline())),
                                             Map.entry("artifactId", artifactId),
-                                            Map.entry("expectedArtifactHash", plan.artifactHash()),
+                                            Map.entry("expectedArtifactHash", plan.candidateHash()),
                                             Map.entry("environment", environment),
                                             Map.entry("impactHash", impact.hash()),
                                             Map.entry("suite", suite.descriptor()),
                                             Map.entry("obligations", required))));
+            if (plan.external()) {
+                var scope = new LinkedHashMap<String, Object>();
+                addExternalScope(scope, plan);
+                scope.forEach(
+                        (name, value) ->
+                                ((ObjectNode) request).set(name, json.parse(json.write(value))));
+                ((ObjectNode) request).set("externalExecution", externalExecution(plan));
+            }
             var fetched = gateway.observe(request);
             if (!"RECEIVED".equals(fetched.status()))
                 throw new Failure(
@@ -651,6 +677,7 @@ public final class ProductionAdmissionService {
                     "targetBaselines",
                     "inputs",
                     "suite",
+                    "externalExecution",
                     "regression");
             if (ProductionJson.integer(doc, "protocolVersion", 2) != 2
                     || !requestId.toString().equals(ProductionJson.text(doc, "requestId", 36))
@@ -666,6 +693,15 @@ public final class ProductionAdmissionService {
                         "Production observation belongs to another operation, environment or model");
             String bindingRevision = ProductionJson.text(doc, "bindingRevision", 240);
             validateArtifact(doc.path("artifact"), artifactId, plan);
+            if (plan.external()) {
+                if (!externalExecution(plan).equals(doc.path("externalExecution")))
+                    throw new Failure(
+                            "INCONCLUSIVE",
+                            "External platform did not prove enforced read-only declared-input and declared-target scope");
+            } else if (doc.has("externalExecution"))
+                throw new Failure(
+                        "INCONCLUSIVE",
+                        "Unexpected external execution evidence for a model-compiled artifact");
             JsonNode baseline = baseline(doc.path("baseline"), plan);
             JsonNode targetBaselines =
                     ProductionTargetVersions.baselines(
@@ -706,7 +742,7 @@ public final class ProductionAdmissionService {
                                             "pipeline",
                                             ProductionModels.pointer(plan.pipeline()),
                                             "artifactHash",
-                                            plan.artifactHash(),
+                                            plan.candidateHash(),
                                             "environment",
                                             environment,
                                             "baseline",
@@ -723,6 +759,14 @@ public final class ProductionAdmissionService {
                                             suite.descriptor(),
                                             "sourceBindings",
                                             sourceProof)));
+            if (plan.external()) {
+                var scope = new LinkedHashMap<String, Object>();
+                addExternalScope(scope, plan);
+                scope.forEach(
+                        (name, value) ->
+                                ((ObjectNode) context).set(name, json.parse(json.write(value))));
+                ((ObjectNode) context).set("externalExecution", externalExecution(plan));
+            }
             JsonNode report =
                     json.parse(
                             json.write(
@@ -746,18 +790,39 @@ public final class ProductionAdmissionService {
             JsonNode artifact, String artifactId, ProductionModels.Plan plan) {
         ProductionJson.fields(
                 artifact, "artifactId", "version", "contentHash", "mediaType", "content");
+        var external = plan.externalArtifact();
+        String expectedMedia =
+                plan.external()
+                        ? external.orElseThrow(
+                                        () ->
+                                                new Failure(
+                                                        "NOT_CONFIGURED",
+                                                        "External artifact profile is missing"))
+                                .mediaType()
+                        : "application/vnd.awe.pipeline-plan+json";
         if (!artifactId.equals(ProductionJson.text(artifact, "artifactId", 240))
-                || !"application/vnd.awe.pipeline-plan+json"
-                        .equals(ProductionJson.text(artifact, "mediaType", 100)))
+                || !expectedMedia.equals(ProductionJson.text(artifact, "mediaType", 120))
+                || plan.external()
+                        && (!artifactId.equals(external.orElseThrow().artifactId())
+                                || !external.orElseThrow()
+                                        .artifactVersion()
+                                        .equals(ProductionJson.text(artifact, "version", 240))))
             throw new Failure(
                     "INCONCLUSIVE", "Actual platform artifact identity or media type differs");
-        String content = ProductionJson.text(artifact, "content", 1_000_000);
+        String content;
+        if (plan.external()) {
+            JsonNode raw = artifact.path("content");
+            if (!raw.isTextual())
+                throw new IllegalArgumentException("External artifact content must be text");
+            ProductionExternalArtifacts.requireUtf8Text(raw.asText());
+            content = raw.asText();
+        } else content = ProductionJson.text(artifact, "content", 1_000_000);
         if (!sha256(content).equals(ProductionJson.hash(artifact, "contentHash"))
-                || !plan.artifactHash().equals(ProductionJson.hash(artifact, "contentHash"))
-                || !content.equals(json.canonical(plan.artifact())))
+                || !plan.candidateHash().equals(ProductionJson.hash(artifact, "contentHash"))
+                || !plan.external() && !content.equals(json.canonical(plan.artifact())))
             throw new Failure(
                     "STALE",
-                    "Actual artifact bytes differ from the independently constructed model-compiled artifact");
+                    "Actual artifact bytes differ from the fixed model-compiled artifact or registered external digest");
         ProductionJson.text(artifact, "version", 240);
     }
 
@@ -847,7 +912,32 @@ public final class ProductionAdmissionService {
                 "targetBaselinesHash",
                 "impactHash",
                 "inputRevisionsHash",
+                "externalArtifactProfileHash",
+                "referenceArtifactHash",
+                "proofScopeRef",
                 "checks");
+        if (current.plan().external()) {
+            var external = current.plan().externalArtifact().orElseThrow();
+            if (!externalProfileHash(current.plan())
+                            .equals(ProductionJson.hash(proof, "externalArtifactProfileHash"))
+                    || !current.plan()
+                            .artifactHash()
+                            .equals(ProductionJson.hash(proof, "referenceArtifactHash"))
+                    || !external.proofScopeRef()
+                            .equals(ProductionJson.text(proof, "proofScopeRef", 240)))
+                return report(
+                        "INCONCLUSIVE",
+                        current,
+                        "Regression does not prove the exact registered external artifact profile and finite scope",
+                        proof);
+        } else if (proof.has("externalArtifactProfileHash")
+                || proof.has("referenceArtifactHash")
+                || proof.has("proofScopeRef"))
+            return report(
+                    "INCONCLUSIVE",
+                    current,
+                    "A model-compiled regression cannot self-declare an external proof profile",
+                    proof);
         ProductionJson.text(proof, "runId", 240);
         ProductionJson.text(proof, "attemptId", 120);
         Instant observed = ProductionJson.instant(proof, "observedAt");
@@ -1003,6 +1093,65 @@ public final class ProductionAdmissionService {
         return keys;
     }
 
+    private JsonNode externalExecution(ProductionModels.Plan plan) {
+        return json.parse(
+                json.write(
+                        Map.of(
+                                "mode", ProductionExternalArtifacts.EXECUTION_MODE,
+                                "profileHash", externalProfileHash(plan),
+                                "readFunctions",
+                                        plan.contract().sources().stream()
+                                                .map(
+                                                        s ->
+                                                                Map.of(
+                                                                        "alias",
+                                                                        s.alias(),
+                                                                        "readFunction",
+                                                                        new TypedModels()
+                                                                                .encodeValue(
+                                                                                        s
+                                                                                                .readFunction())))
+                                                .sorted(
+                                                        Comparator.comparing(
+                                                                e -> e.get("alias").toString()))
+                                                .toList(),
+                                "targetBindingRefs",
+                                        plan.targets().stream()
+                                                .map(
+                                                        t ->
+                                                                t.contract()
+                                                                        .targetBindingRef()
+                                                                        .orElseThrow())
+                                                .sorted()
+                                                .toList())));
+    }
+
+    private String externalProfileHash(ProductionModels.Plan plan) {
+        return json.sha256(
+                json.parse(json.write(plan.externalArtifact().orElseThrow().descriptor())));
+    }
+
+    private void addExternalScope(Map<String, Object> destination, ProductionModels.Plan plan) {
+        if (!plan.external()) return;
+        destination.put("externalArtifact", plan.externalArtifact().orElseThrow().descriptor());
+        destination.put("externalArtifactProfileHash", externalProfileHash(plan));
+        destination.put("referenceArtifactHash", plan.artifactHash());
+    }
+
+    private JsonNode proposalArtifact(ProductionModels.Plan plan) {
+        if (!plan.external()) return plan.artifact();
+        var document = new LinkedHashMap<String, Object>();
+        document.put("referenceArtifact", plan.artifact());
+        document.put("referenceArtifactHash", plan.artifactHash());
+        document.put(
+                "externalCandidate",
+                plan.externalArtifact()
+                        .map(a -> (Object) a.descriptor())
+                        .orElse(Map.of("status", "NOT_CONFIGURED")));
+        document.put("proofScope", plan.proofScope());
+        return json.parse(json.write(document));
+    }
+
     private String configurationHash() {
         return json.sha256(
                 json.parse(
@@ -1015,7 +1164,9 @@ public final class ProductionAdmissionService {
                                         "regressionSuites",
                                         suites.configurationHash(),
                                         "maxEvidenceAgeSeconds",
-                                        maxEvidenceAge))));
+                                        maxEvidenceAge,
+                                        "externalArtifacts",
+                                        models.externalArtifactConfigurationHash()))));
     }
 
     private Map<String, Object> latestCheck(UUID id) {

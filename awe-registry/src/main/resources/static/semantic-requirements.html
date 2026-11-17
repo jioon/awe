@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AWE · 结构化数据需求</title>
+    <link rel="stylesheet" href="/workbench-pages.css" />
+    <script src="/exact-json.js" defer></script>
+    <script src="/semantic-requirements.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <h1>AWE · 结构化数据需求</h1>
+      <p>
+        表达正式指标、统计对象、分组、筛选和时间要求，由服务端选择能力并推导合法计划。
+      </p>
+      <nav class="entry-links">
+        <a href="/">模型生产</a><a href="/consumption.html">Dataset 取数</a>
+        <a href="/metric-consumption.html">固定指标消费</a>
+        <a href="/knowledge.html">知识与反馈</a
+        ><a href="/production.html">变更准入</a>
+      </nav>
+    </header>
+    <main>
+      <div class="layout">
+        <aside class="panel">
+          <h2>消费身份与证据</h2>
+          <label for="semanticConsumerToken"
+            >独立消费 Token（仅在本页内存中使用）</label
+          >
+          <input
+            id="semanticConsumerToken"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            aria-label="独立消费 Token"
+          />
+          <div class="actions">
+            <button id="clearSemanticIdentity">清除凭据与结果</button>
+          </div>
+          <p class="muted">
+            更换凭据会取消旧请求、清除结果。作者或审核身份不继承数据权限。
+          </p>
+          <h3>读取规划观测</h3>
+          <label for="semanticAssessmentId">真实规划观测 ID</label>
+          <input
+            id="semanticAssessmentId"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <div class="actions">
+            <button id="readSemanticAssessment">读取规划观测</button>
+          </div>
+          <h3>读取数据操作</h3>
+          <label for="semanticOperationId">真实数据操作 ID</label>
+          <input
+            id="semanticOperationId"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <div class="actions">
+            <button id="readSemanticOperation">读取数据操作</button>
+          </div>
+          <p class="muted">
+            历史观测只展示原证据。需要重新评估当前请求后，才能从此页发起新执行。
+          </p>
+        </aside>
+        <div class="stack">
+          <section class="panel">
+            <h2>1 · 表达数据要求</h2>
+            <p class="callout">
+              先在已发布知识中取得真实 Metric Release、Hash
+              和统计对象定义。分组与筛选引用正式输出维度， 不提交 SQL、IR
+              或已授权声明。时间边界、时区、口径和用途由业务明确填写。
+            </p>
+            <label for="semanticRequest">QUERY_METRIC v3 请求</label>
+            <textarea
+              id="semanticRequest"
+              rows="25"
+              spellcheck="false"
+              aria-label="结构化指标需求 JSON"
+            ></textarea>
+            <div class="actions">
+              <button id="assessSemanticRequirements" class="primary">
+                评估需求并生成计划
+              </button>
+              <button id="newSemanticRequestKey">生成新的执行键</button>
+              <button id="resetSemanticTemplate">查看请求结构模板</button>
+            </div>
+            <p id="semanticKeyState" class="muted"></p>
+            <p class="muted">
+              网络失败保留同一请求及执行键，便于幂等重试。收到终态后自动换新键，下次执行需重新评估。
+              修改需求会使本页原规划失效；不会把旧计划用于另一个问题。
+            </p>
+            <div id="notice" role="status" aria-live="polite"></div>
+          </section>
+          <section class="panel">
+            <h2>2 · 检查服务端能力裁决</h2>
+            <p class="callout warn">
+              PLANNED
+              仅表示模型、类型与当前策略下的静态计划成立，不代表来源已就绪、数值已验证或业务任务完成。
+              多个合法实现需明确选择；未支持或不可见不会自动转成任意 SQL。
+            </p>
+            <div id="semanticCandidates"></div>
+            <div id="semanticAssessmentOutput">
+              <p class="empty">尚未取得实际规划观测。</p>
+            </div>
+            <div class="actions">
+              <button id="executeSemanticRequirements" class="primary" disabled>
+                执行当前已评估需求
+              </button>
+            </div>
+            <p class="muted">
+              执行时服务端重新解析、授权和推导计划，复核实际来源、预算、就绪与验证要求。
+            </p>
+          </section>
+          <section class="panel">
+            <h2>3 · 数据结果与证据</h2>
+            <div id="semanticOperationOutput">
+              <p class="empty">尚未取得实际数据操作。</p>
+            </div>
+            <p class="muted">
+              NO_RECORD、0、NULL、NOT_READY 和 NOT_CONFIGURED
+              分别保留。结果数值使用无损字面值展示，
+              载荷过期不视为无记录。可把真实操作 ID 关联到知识反馈与受审回归。
+            </p>
+          </section>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

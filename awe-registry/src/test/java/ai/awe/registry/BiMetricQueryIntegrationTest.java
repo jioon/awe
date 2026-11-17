@@ -41,7 +41,7 @@ final class BiMetricQueryIntegrationTest extends MetricQueryTestSupport {
     private static final String ROLLING_QUERY =
             "SELECT COUNT(DISTINCT user_id) AS value FROM public.awe_metric_events WHERE event_time>=((?::timestamptz AT TIME ZONE 'Asia/Shanghai')-INTERVAL '6 days') AT TIME ZONE 'Asia/Shanghai' AND event_time<? AND user_id IS NOT NULL";
     private static SqlBackedMetricGateway gateway;
-    private JsonNode metric, function, rollingFunction;
+    private JsonNode metric, function, rollingFunction, nativeMetric;
 
     private static synchronized SqlBackedMetricGateway gateway() {
         if (gateway == null) {
@@ -120,7 +120,10 @@ final class BiMetricQueryIntegrationTest extends MetricQueryTestSupport {
                                                                 "function." + BI_DOMAIN + ".dau",
                                                                 "function."
                                                                         + BI_DOMAIN
-                                                                        + ".rolling"),
+                                                                        + ".rolling",
+                                                                "function."
+                                                                        + BI_DOMAIN
+                                                                        + ".native_city_app"),
                                                         "purposes",
                                                         List.of(PURPOSE),
                                                         "fields",
@@ -128,7 +131,11 @@ final class BiMetricQueryIntegrationTest extends MetricQueryTestSupport {
                                                                 "event_id",
                                                                 "user_id",
                                                                 "event_time",
-                                                                "value"),
+                                                                "value",
+                                                                "city",
+                                                                "app",
+                                                                "channel",
+                                                                "private_value"),
                                                         "maxRows",
                                                         100,
                                                         "maxBytes",
@@ -201,6 +208,50 @@ final class BiMetricQueryIntegrationTest extends MetricQueryTestSupport {
         rollingFunction =
                 publish("FunctionDefinition", queryFunctionSpec(BI_DOMAIN, "rolling", true));
         gateway().bindMetric(ROLLING_CAPABILITY, rolling);
+        Object groupedInput =
+                Map.of(
+                        "kind", "PROJECT",
+                        "input", excludeUnknownIdentity(scan()),
+                        "columns",
+                                List.of(
+                                        Map.of(
+                                                "name",
+                                                "city",
+                                                "expression",
+                                                field("events.channel")),
+                                        Map.of(
+                                                "name",
+                                                "app",
+                                                "expression",
+                                                field("events.private_value")),
+                                        Map.of(
+                                                "name",
+                                                "user_id",
+                                                "expression",
+                                                field("events.user_id"))));
+        nativeMetric =
+                publish(
+                        "Metric",
+                        metricSpec(
+                                BI_DOMAIN,
+                                "native_city_app",
+                                "COUNT_DISTINCT",
+                                "users",
+                                aggregate(
+                                        groupedInput,
+                                        List.of("city", "app"),
+                                        List.of(
+                                                measure(
+                                                        "value",
+                                                        "COUNT_DISTINCT",
+                                                        field("user_id")))),
+                                List.of(
+                                        output("city", "STRING", "city", false),
+                                        output("app", "STRING", "app", true),
+                                        output("value", "INTEGER", "users", false)),
+                                List.of("city", "app"),
+                                null));
+        publish("FunctionDefinition", queryFunctionSpec(BI_DOMAIN, "native_city_app", false));
     }
 
     @BeforeEach
@@ -244,6 +295,134 @@ final class BiMetricQueryIntegrationTest extends MetricQueryTestSupport {
         return request;
     }
 
+    private ObjectNode semanticRequest(
+            JsonNode semanticMetric, List<String> dimensions, List<Map<String, Object>> filters) {
+        return json.object(
+                json.write(
+                        model(
+                                "protocolVersion", 3,
+                                "intent", "QUERY_METRIC",
+                                "metric",
+                                        Map.of(
+                                                "releaseId",
+                                                semanticMetric.path("id").asText(),
+                                                "contentHash",
+                                                semanticMetric.path("content_hash").asText()),
+                                "requirements",
+                                        model(
+                                                "statisticalSubject",
+                                                Map.of(
+                                                        "entityId",
+                                                        "entity." + BI_DOMAIN + ".user",
+                                                        "modelVersion",
+                                                        "1.0.0"),
+                                                "unit",
+                                                "users",
+                                                "businessZone",
+                                                "Asia/Shanghai",
+                                                "timeRole",
+                                                "EVENT_TIME",
+                                                "measures",
+                                                List.of("value"),
+                                                "dimensions",
+                                                dimensions,
+                                                "filters",
+                                                filters,
+                                                "from",
+                                                FROM,
+                                                "to",
+                                                TO,
+                                                "view",
+                                                "OBSERVED_SNAPSHOT",
+                                                "verification",
+                                                "REQUIRE_INDEPENDENT"),
+                                "consumer", Map.of("purpose", PURPOSE),
+                                "constraints", Map.of("maxRows", 100, "maxBytes", 16384),
+                                "idempotencyKey", key())));
+    }
+
+    @Test
+    void v3ExactDirectCapabilityKeepsActualIndependentSqlVerificationAndExplicitSemanticContext()
+            throws Exception {
+        var request = semanticRequest(metric, List.of(), List.of());
+        int before = gateway().referenceQueries();
+        var operation = ok("POST", "/api/data-tasks", CONSUMER, request);
+        assertEquals("QUERIED", operation.path("status").asText(), operation.toString());
+        assertEquals(
+                "PASSED",
+                operation.path("verification").path("independentReconciliation").asText());
+        assertEquals(before + 1, gateway().referenceQueries());
+        assertEquals(3, operation.path("result").path("rows").get(0).path("value").asInt());
+        var checked = gateway().lastVerificationRequest();
+        assertEquals(request.path("requirements"), checked.path("semanticRequirements"));
+        assertEquals(operation.path("resolved").path("derivation"), checked.path("derivation"));
+        assertEquals(operation.path("resolved").path("contract"), checked.path("derivedContract"));
+        assertEquals(operation.path("resolved").path("planHash"), checked.path("planHash"));
+        assertFalse(checked.has("rows"));
+        assertFalse(checked.has("actualRows"));
+    }
+
+    @Test
+    void nativeDerivedPlanSendsExactRequirementsButCheckerCannotInventOwnershipOfNativeSnapshot()
+            throws Exception {
+        var request =
+                semanticRequest(
+                        nativeMetric,
+                        List.of("city"),
+                        List.of(
+                                Map.of(
+                                        "field",
+                                        "city",
+                                        "operation",
+                                        "EQ",
+                                        "type",
+                                        "STRING",
+                                        "value",
+                                        "native")));
+        int before = gateway().referenceQueries();
+        int biBefore = gateway().actualQueries();
+        var operation = ok("POST", "/api/data-tasks", CONSUMER, request);
+        assertEquals("INCONCLUSIVE", operation.path("status").asText(), operation.toString());
+        assertNotEquals(
+                "PASSED",
+                operation.path("verification").path("independentReconciliation").asText());
+        assertTrue(operation.path("result").path("rows").isEmpty());
+        assertEquals(before, gateway().referenceQueries());
+        assertEquals(biBefore, gateway().actualQueries());
+        var checked = gateway().lastVerificationRequest();
+        assertEquals(request.path("requirements"), checked.path("semanticRequirements"));
+        assertEquals(operation.path("resolved").path("derivation"), checked.path("derivation"));
+        assertEquals(operation.path("resolved").path("contract"), checked.path("derivedContract"));
+        assertEquals(json.parse("[\"city\"]"), checked.path("derivedContract").path("grain"));
+        assertFalse(checked.has("rows"));
+        assertFalse(checked.has("actualRows"));
+        assertFalse(checked.path("executionEvidence").toString().contains("reference-query-run:"));
+    }
+
+    @Test
+    void v3StructurallyValidWrongValueStillFailsTheIndependentRetainedSnapshotQuery()
+            throws Exception {
+        gateway()
+                .mutateResponse(
+                        response ->
+                                ((ObjectNode) response.path("result").path("rows").get(0))
+                                        .put("value", 999));
+        int before = gateway().referenceQueries();
+        var operation =
+                ok(
+                        "POST",
+                        "/api/data-tasks",
+                        CONSUMER,
+                        semanticRequest(metric, List.of(), List.of()));
+        assertEquals(
+                "FAILED_VERIFICATION", operation.path("status").asText(), operation.toString());
+        assertEquals(
+                "FAILED",
+                operation.path("verification").path("independentReconciliation").asText());
+        assertEquals(before + 1, gateway().referenceQueries());
+        assertTrue(operation.path("result").path("rows").isEmpty());
+    }
+
     @Test
     void
             directMetricReturnsActualCountWithWindowBoundReadinessAndIndependentSnapshotReconciliation()
@@ -268,6 +447,8 @@ final class BiMetricQueryIntegrationTest extends MetricQueryTestSupport {
         assertEquals(metric.path("content_hash"), actualRequest.path("metric").path("contentHash"));
         assertEquals(FROM, actualRequest.path("scope").path("from").asText());
         assertFalse(actualRequest.has("sql"));
+        assertFalse(gateway().lastVerificationRequest().has("semanticRequirements"));
+        assertFalse(gateway().lastVerificationRequest().has("derivedContract"));
         assertFalse(operation.has("overallTaskSuccess"));
     }
 
