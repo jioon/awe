@@ -95,7 +95,15 @@ public final class ProductionObligations {
         for (String key : List.of("releaseId", "entityId", "modelVersion", "contentHash"))
             scope.put(key, subject.get(key));
         scope.put("ruleId", rule);
-        scope.put("artifactHash", plan.artifactHash());
+        scope.put("artifactHash", plan.candidateHash());
+        if (plan.external()) {
+            scope.put("referenceArtifactHash", plan.artifactHash());
+            scope.put(
+                    "externalArtifact",
+                    plan.externalArtifact()
+                            .map(a -> (Object) a.descriptor())
+                            .orElse(Map.of("status", "NOT_CONFIGURED")));
+        }
         scope.put("pipeline", ProductionModels.pointer(plan.pipeline()));
         scope.put("impactHash", impact.hash());
         scope.put("suite", suite.descriptor());

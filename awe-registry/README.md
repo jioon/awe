@@ -4,7 +4,7 @@ Registry 承载 AWE 数仓产品的 Authoring 与首个受控只读 Runtime，�
 
 M1.1 新增独立消费入口：已发布 Function/Dataset/输出行 Schema 约束真实 PostgreSQL 取数，包含消费策略、显式字段/时间范围、预算与结果证据。配置、注册模型和接口见 [受控取数运行说明](CONSUMPTION.md)；它不代替下述三类质量检查，也不代表完整指标问数或企业平台接入已完成。
 
-M1/M2 后续增量已提供 v3 可执行契约、指标/知识/MCP、OIDC/行范围、反馈回归及生产准入/逻辑物化。配置见 [CAPABILITIES.md](CAPABILITIES.md)、[IDENTITY.md](IDENTITY.md)、[PRODUCTION.md](PRODUCTION.md)、[修复与回归](REPAIR.md)；新增工作台为 `/metric-consumption.html`、`/knowledge.html`、`/production.html`。受支持工程验证与企业验收分开，不把通用 Agent 编排纳入 AWE。
+M1/M2 后续增量已提供 v3 可执行契约、指标/知识/MCP、OIDC/行范围、反馈回归及生产准入/逻辑物化。配置见 [CAPABILITIES.md](CAPABILITIES.md)、[结构化需求](REQUIREMENTS.md)、[IDENTITY.md](IDENTITY.md)、[PRODUCTION.md](PRODUCTION.md)、[存量 SQL 准入](EXTERNAL-ARTIFACTS.md)、[修复与回归](REPAIR.md)；工作台为 `/metric-consumption.html`、`/semantic-requirements.html`、`/knowledge.html`、`/production.html`。受支持工程验证与企业验收分开，不把通用 Agent 编排纳入 AWE。
 
 
 ## 开发与启动

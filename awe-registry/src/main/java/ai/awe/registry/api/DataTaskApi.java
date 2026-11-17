@@ -56,6 +56,18 @@ public final class DataTaskApi {
         return json.write(tasks.get(id, grant(request)));
     }
 
+    @PostMapping("/requirements/assess")
+    public String assessRequirements(@RequestBody String body, HttpServletRequest request) {
+        if (body.getBytes(StandardCharsets.UTF_8).length > 65_536)
+            throw new IllegalArgumentException("Data capability request exceeds 64 KiB");
+        return json.write(tasks.assessRequirements(json.object(body), grant(request)));
+    }
+
+    @GetMapping("/requirements/assessments/{id}")
+    public String requirementAssessment(@PathVariable UUID id, HttpServletRequest request) {
+        return json.write(tasks.requirementAssessment(id, grant(request)));
+    }
+
     private ConsumerAccess.Grant grant(HttpServletRequest request) {
         return (ConsumerAccess.Grant) request.getAttribute("awe.consumer");
     }

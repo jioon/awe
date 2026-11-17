@@ -90,3 +90,11 @@ MCP/API 必须鉴权；数据库/BI/调度服务端重新验权。受限 Link、
 ## ADR-020 受审模型替代与结局回归
 
 见 [ADR-020](adr-020-reviewed-repair-and-outcome-regressions.md)：旧义务不改写、同问题模型修订的受审替代、真实拒绝/未就绪参考及 BI 稳定来源投影。
+
+## ADR-021 结构化需求与受限合法计划
+
+见 [ADR-021](adr-021-semantic-requirements-planning.md)：正式指标、主体/单位/时间与维度要求驱动服务端能力裁决和计划派生；保留业务输入、重新去重、显式消歧与完整当前授权，静态计划不冒充就绪。
+
+## ADR-022 存量外部 SQL 的有限准入
+
+见 [ADR-022](adr-022-registered-external-artifact-admission.md)：原文制品与正式意图 Hash 分离、管理员登记、声明输入只读隔离、具名有限回归及现有完整准入/CAS 链路；不证明任意代码等价。

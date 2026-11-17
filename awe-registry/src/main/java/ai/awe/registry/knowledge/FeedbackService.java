@@ -299,7 +299,13 @@ public class FeedbackService {
                 replay.put("idempotencyKey", childKey);
                 actual = json.parse(json.write(operations.create(replay, grant, identity)));
             }
-        } else actual = json.parse(json.write(knowledge.resolve(original, grant)));
+        } else
+            actual =
+                    json.parse(
+                            json.write(
+                                    original.path("protocolVersion").asInt() == 3
+                                            ? operations.assessRequirements(original, grant)
+                                            : knowledge.resolve(original, grant)));
         if ("RUNNING".equals(actual.path("status").asText()))
             throw new IllegalStateException(
                     "Regression observation is still running; retry the same key");
@@ -646,6 +652,22 @@ public class FeedbackService {
                             "contentHash",
                             candidate.path("contentHash").asText()));
         candidates.sort(Comparator.comparing(c -> c.get("releaseId")));
+        if (result.path("request").path("protocolVersion").asInt() == 3)
+            // v3 的能力裁决不止是“找到哪个名称”；未支持与未披露、派生计划变化均须触发回归。
+            return json.sha256(
+                    json.parse(
+                            json.write(
+                                    Map.of(
+                                            "resolution", result.path("resolution").asText(),
+                                            "candidates", candidates,
+                                            "status", result.path("status").asText(),
+                                            "decision", result.path("decision"),
+                                            "catalogComplete", result.path("catalogComplete"),
+                                            "diagnostics", result.path("diagnostics"),
+                                            "planHash",
+                                                    result.path("resolved")
+                                                            .path("planHash")
+                                                            .asText()))));
         return json.sha256(
                 json.parse(
                         json.write(

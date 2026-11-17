@@ -37,7 +37,21 @@ final class SqlBackedProductionPlatform implements AutoCloseable {
             DEPLOYMENTS = "public.awe_production_reference_deployment_v2",
             TARGET_STATE = "public.awe_production_reference_target_state";
 
-    private record Artifact(JsonNode document, String content, String table, boolean coreOnly) {}
+    private record Artifact(
+            JsonNode document,
+            String content,
+            String table,
+            boolean coreOnly,
+            String mediaType,
+            String version,
+            String proofScopeRef,
+            String role,
+            String password,
+            String registeredHash) {
+        boolean external() {
+            return !role.isEmpty();
+        }
+    }
 
     private record Execution(
             List<Map<String, Object>> rows,
@@ -109,7 +123,17 @@ final class SqlBackedProductionPlatform implements AutoCloseable {
     void register(String artifactId, JsonNode document, String targetTable, boolean coreOnly) {
         artifacts.put(
                 artifactId,
-                new Artifact(document.deepCopy(), json.canonical(document), targetTable, coreOnly));
+                new Artifact(
+                        document.deepCopy(),
+                        json.canonical(document),
+                        targetTable,
+                        coreOnly,
+                        "application/vnd.awe.pipeline-plan+json",
+                        "uploaded-v1",
+                        "",
+                        "",
+                        "",
+                        sha(json.canonical(document))));
         if (document.path("pipelineContract").path("targets").size() == 1) {
             JsonNode target = document.path("pipelineContract").path("targets").get(0);
             registeredTargets.put(
@@ -121,6 +145,80 @@ final class SqlBackedProductionPlatform implements AutoCloseable {
         }
     }
 
+    void registerExternal(
+            String artifactId,
+            JsonNode formalArtifact,
+            String sql,
+            String targetTable,
+            boolean coreOnly,
+            String proofScopeRef) {
+        register(artifactId, formalArtifact, targetTable, coreOnly);
+        String role = "awe_external_" + UUID.randomUUID().toString().replace("-", "");
+        String password = UUID.randomUUID().toString();
+        db.execute(
+                "CREATE ROLE "
+                        + role
+                        + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD '"
+                        + password
+                        + "'");
+        var schemas = new HashSet<String>();
+        for (JsonNode source : formalArtifact.path("pipelineContract").path("sources")) {
+            var function =
+                    (FunctionDefinition)
+                            typed.decode(
+                                    "FunctionDefinition", releaseSpec(source.path("readFunction")));
+            JsonNode dataset = releaseSpec(json.parse(json.write(function.ownerType())));
+            String relation =
+                    warehouse.relation(
+                            dataset.path("bindings").get(0).path("externalRef").asText());
+            String schema = relation.split("\\.")[0];
+            if (schemas.add(schema))
+                db.execute(
+                        "GRANT USAGE ON SCHEMA "
+                                + PostgresWarehouse.quoteIdentifier(schema)
+                                + " TO "
+                                + role);
+            var row =
+                    (ObjectType)
+                            typed.decode(
+                                    "ObjectType",
+                                    releaseSpec(
+                                            json.parse(
+                                                    json.write(
+                                                            ai.awe.registry.model
+                                                                    .DatasetExtractProfile
+                                                                    .parseResultRef(
+                                                                            function
+                                                                                    .resultSchemaRef())))));
+            String columns =
+                    String.join(
+                            ",",
+                            row.properties().stream()
+                                    .map(p -> PostgresWarehouse.quoteIdentifier(p.name()))
+                                    .toList());
+            db.execute(
+                    "GRANT SELECT ("
+                            + columns
+                            + ") ON "
+                            + PostgresWarehouse.quoteRelation(relation)
+                            + " TO "
+                            + role);
+        }
+        artifacts.put(
+                artifactId,
+                new Artifact(
+                        formalArtifact.deepCopy(),
+                        sql,
+                        targetTable,
+                        coreOnly,
+                        "application/sql",
+                        "external-v1",
+                        proofScopeRef,
+                        role,
+                        password,
+                        sha(sql)));
+    }
+
     void corrupt(String artifactId) {
         var current = artifacts.get(artifactId);
         artifacts.put(
@@ -129,7 +227,13 @@ final class SqlBackedProductionPlatform implements AutoCloseable {
                         current.document(),
                         " " + current.content(),
                         current.table(),
-                        current.coreOnly()));
+                        current.coreOnly(),
+                        current.mediaType(),
+                        current.version(),
+                        current.proofScopeRef(),
+                        current.role(),
+                        current.password(),
+                        current.registeredHash()));
     }
 
     void advanceBaseline(String pipelineId) {
@@ -162,11 +266,11 @@ final class SqlBackedProductionPlatform implements AutoCloseable {
                                             "artifactId",
                                             request.path("artifactId").asText(),
                                             "version",
-                                            "uploaded-v1",
+                                            artifact.version(),
                                             "contentHash",
                                             sha(artifact.content()),
                                             "mediaType",
-                                            "application/vnd.awe.pipeline-plan+json",
+                                            artifact.mediaType(),
                                             "content",
                                             artifact.content()))));
             response.set(
@@ -179,6 +283,8 @@ final class SqlBackedProductionPlatform implements AutoCloseable {
                     currentTargets(
                             request.path("environment").asText(), request.path("physicalTargets")));
             response.set("suite", request.get("suite"));
+            if (artifact.external())
+                response.set("externalExecution", enforcedExternalScope(request, artifact));
             if (request.path("phase").asText().equals("VERIFY")) {
                 var executions = new ArrayList<Execution>();
                 for (int i = 0;
@@ -205,6 +311,13 @@ final class SqlBackedProductionPlatform implements AutoCloseable {
                 proof.set("impactHash", request.get("impactHash"));
                 proof.put("targetBaselinesHash", json.sha256(response.path("targetBaselines")));
                 proof.put("inputRevisionsHash", json.sha256(execution.inputs()));
+                if (artifact.external()) {
+                    proof.put(
+                            "externalArtifactProfileHash",
+                            json.sha256(request.path("externalArtifact")));
+                    proof.put("referenceArtifactHash", json.sha256(artifact.document()));
+                    proof.put("proofScopeRef", artifact.proofScopeRef());
+                }
                 var checks = json.parse("[]");
                 for (JsonNode obligation : request.path("obligations")) {
                     String rule = obligation.path("ruleId").asText();
@@ -584,6 +697,71 @@ final class SqlBackedProductionPlatform implements AutoCloseable {
         return values;
     }
 
+    private JsonNode enforcedExternalScope(JsonNode request, Artifact artifact) {
+        JsonNode pipeline = artifact.document().path("pipeline");
+        JsonNode expected =
+                json.parse(
+                        json.write(
+                                Map.of(
+                                        "pipelineId", pipeline.path("entityId").asText(),
+                                        "modelVersion", pipeline.path("modelVersion").asText(),
+                                        "artifactId", request.path("artifactId").asText(),
+                                        "artifactVersion", artifact.version(),
+                                        "mediaType", artifact.mediaType(),
+                                        "contentHash", artifact.registeredHash(),
+                                        "proofScope", "REGISTERED_EXTERNAL_FINITE_REGRESSION",
+                                        "executionMode", "READ_ONLY_QUERY_DECLARED_TARGETS",
+                                        "proofScopeRef", artifact.proofScopeRef())));
+        if (!expected.equals(request.path("externalArtifact"))
+                || !json.sha256(expected)
+                        .equals(request.path("externalArtifactProfileHash").asText())
+                || !json.sha256(artifact.document())
+                        .equals(request.path("referenceArtifactHash").asText()))
+            throw new IllegalArgumentException(
+                    "External profile is not the platform's registered actual artifact");
+        var sourceRefs = new ArrayList<JsonNode>();
+        for (JsonNode source : artifact.document().path("pipelineContract").path("sources"))
+            sourceRefs.add(source);
+        sourceRefs.sort(Comparator.comparing(n -> n.path("alias").asText()));
+        var targetRefs = new ArrayList<String>();
+        for (JsonNode target : artifact.document().path("pipelineContract").path("targets"))
+            targetRefs.add(
+                    releaseSpec(target.path("dataset"))
+                            .path("datasetContract")
+                            .path("targetBindingRef")
+                            .asText());
+        Collections.sort(targetRefs);
+        JsonNode enforced =
+                json.parse(
+                        json.write(
+                                Map.of(
+                                        "mode",
+                                        "READ_ONLY_QUERY_DECLARED_TARGETS",
+                                        "profileHash",
+                                        json.sha256(expected),
+                                        "readFunctions",
+                                        sourceRefs,
+                                        "targetBindingRefs",
+                                        targetRefs)));
+        if (!enforced.equals(request.path("externalExecution")))
+            throw new IllegalArgumentException(
+                    "External execution scope differs from platform-enforced role and targets");
+        return enforced;
+    }
+
+    private Connection externalConnection(Artifact artifact) throws SQLException {
+        String url;
+        try (Connection original = warehouse.openReadOnly()) {
+            url = original.getMetaData().getURL();
+        }
+        Connection connection =
+                DriverManager.getConnection(url, artifact.role(), artifact.password());
+        connection.setReadOnly(true);
+        connection.setAutoCommit(false);
+        connection.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
+        return connection;
+    }
+
     private Execution execute(Artifact artifact, int targetIndex) {
         var contract =
                 typed.pipelineContract(
@@ -645,12 +823,18 @@ final class SqlBackedProductionPlatform implements AutoCloseable {
                         MetricContract.ZeroDivisionPolicy.NULL,
                         Optional.empty());
         List<Map<String, Object>> actual;
-        try (Connection connection = warehouse.openReadOnly()) {
+        try (Connection metadata = artifact.external() ? warehouse.openReadOnly() : null;
+                Connection connection =
+                        artifact.external()
+                                ? externalConnection(artifact)
+                                : warehouse.openReadOnly()) {
             try {
                 var catalogs = new TreeMap<String, PostgresWarehouse.Catalog>();
                 for (var source : resolved.values()) {
                     String external = source.binding().path("externalRef").asText();
-                    catalogs.put(source.alias(), warehouse.inspect(connection, external));
+                    catalogs.put(
+                            source.alias(),
+                            warehouse.inspect(metadata == null ? connection : metadata, external));
                     String revision = sourceRevision();
                     String snapshot = warehouse.snapshotRef(connection, external);
                     actualInputs.add(
@@ -676,29 +860,37 @@ final class SqlBackedProductionPlatform implements AutoCloseable {
                                         Instant.parse(MetricQueryTestSupport.FROM),
                                         Instant.parse(MetricQueryTestSupport.TO))
                                 .compile();
+                String candidateSql = artifact.external() ? artifact.content() : compiled.sql();
                 String sql =
                         wrongExecution
-                                ? "SELECT user_id,score+1 AS score FROM ("
-                                        + compiled.sql()
-                                        + ") bad"
-                                : compiled.sql();
+                                ? "SELECT user_id,score+1 AS score FROM (" + candidateSql + ") bad"
+                                : candidateSql;
                 actual = new ArrayList<>();
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
-                    for (int i = 0; i < compiled.parameters().size(); i++)
-                        statement.setObject(i + 1, compiled.parameters().get(i));
+                    if (artifact.external()) {
+                        statement.setQueryTimeout(5);
+                        statement.setMaxRows(10001);
+                    }
+                    if (!artifact.external())
+                        for (int i = 0; i < compiled.parameters().size(); i++)
+                            statement.setObject(i + 1, compiled.parameters().get(i));
                     try (ResultSet rs = statement.executeQuery()) {
-                        while (rs.next())
+                        while (rs.next()) {
+                            if (actual.size() >= 10000)
+                                throw new SQLException("External candidate row budget exceeded");
                             actual.add(
                                     Map.of(
                                             "user_id",
                                             rs.getString("user_id"),
                                             "score",
                                             new java.math.BigInteger(rs.getString("score"))));
+                        }
                     }
                 }
                 actualQueries.incrementAndGet();
             } finally {
                 connection.rollback();
+                if (metadata != null) metadata.rollback();
             }
         } catch (Exception ex) {
             throw new IllegalStateException(
@@ -868,5 +1060,16 @@ final class SqlBackedProductionPlatform implements AutoCloseable {
     @Override
     public void close() {
         server.stop(0);
+        if (db != null) {
+            for (String role :
+                    artifacts.values().stream()
+                            .map(Artifact::role)
+                            .filter(r -> !r.isEmpty())
+                            .distinct()
+                            .toList()) {
+                db.execute("DROP OWNED BY " + role);
+                db.execute("DROP ROLE " + role);
+            }
+        }
     }
 }

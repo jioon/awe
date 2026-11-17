@@ -48,17 +48,28 @@
     }
   }
   $("productionPipeline").onchange = fillPipeline;
-  bind("readProductionPlan", async () =>
-    show(
-      "productionPlan",
-      await author(
-        "/production/plans/" +
-          uuid("productionPipelineId") +
-          "?contentHash=" +
-          hash("productionPipelineHash"),
-      ),
-    ),
-  );
+  bind("readProductionPlan", async () => {
+    const document = await author(
+      "/production/plans/" + uuid("productionPipelineId") + "?contentHash=" + hash("productionPipelineHash"),
+    );
+    show("productionPlan", document);
+    const summary = $("productionArtifactScope");
+    summary.replaceChildren();
+    if (document.externalCandidate) {
+      const candidate = document.externalCandidate;
+      summary.append(C.el("p", "正式加工意图 Hash：" + document.contentHash, "muted"));
+      if (candidate.status === "NOT_CONFIGURED") {
+        $("productionArtifactId").value = "";
+        summary.append(C.el("p", "REGISTERED_EXTERNAL 尚未登记外部制品与有限验证范围。当前只有正式加工意图，不能取得部署许可。", "callout warn"));
+      } else {
+        $("productionArtifactId").value = candidate.artifactId;
+        summary.append(
+          C.el("p", "已登记外部制品原文 Hash：" + candidate.contentHash, "muted"),
+          C.el("p", "有限验证范围：" + candidate.proofScopeRef + "；执行范围：" + candidate.executionMode, "callout"),
+        );
+      }
+    } else summary.append(C.el("p", "MODEL_COMPILED：平台实际制品须与服务端规范内容及其 Hash 完全一致。", "muted"));
+  });
   bind("prepareProduction", async () => {
     const document = await author("/production/admissions", "POST", {
       pipelineReleaseId: uuid("productionPipelineId"),

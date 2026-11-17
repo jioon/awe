@@ -156,6 +156,8 @@ public final class ApiAuthFilter extends OncePerRequestFilter {
         return path.equals("/api/data-tasks")
                 || path.startsWith("/api/data-tasks/")
                 || path.equals("/api/capabilities")
+                || path.equals("/api/requirements/assess")
+                || path.matches("/api/requirements/assessments/[^/]+")
                 || path.equals("/api/knowledge/resolve")
                 || path.equals("/api/knowledge/assess")
                 || path.equals("/api/semantic-plans/validate")

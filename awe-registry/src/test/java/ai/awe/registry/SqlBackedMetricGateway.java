@@ -49,6 +49,7 @@ final class SqlBackedMetricGateway implements AutoCloseable {
     private volatile Consumer<ObjectNode> verificationMutation = ignored -> {};
     private volatile int responseDelayMillis;
     private volatile JsonNode lastRequest;
+    private volatile JsonNode lastVerificationRequest;
 
     SqlBackedMetricGateway() {
         try {
@@ -147,6 +148,10 @@ final class SqlBackedMetricGateway implements AutoCloseable {
 
     JsonNode lastRequest() {
         return lastRequest;
+    }
+
+    JsonNode lastVerificationRequest() {
+        return lastVerificationRequest;
     }
 
     private void handle(HttpExchange exchange) throws IOException {
@@ -331,6 +336,7 @@ final class SqlBackedMetricGateway implements AutoCloseable {
             }
             ObjectNode request = json.object(new String(bytes, StandardCharsets.UTF_8));
             String operation = request.path("operationId").asText();
+            lastVerificationRequest = request.deepCopy();
             Execution executed = executions.get(operation);
             ObjectNode unhashed = request.deepCopy();
             unhashed.remove("requestHash");

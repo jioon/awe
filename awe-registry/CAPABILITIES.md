@@ -80,8 +80,10 @@ readiness 包含 state、observedAt、snapshotRef、runRef、completeFrom/Throug
 
 ## 反馈、回归与工作台
 
+结构化需求使用 [QUERY_METRIC v3](REQUIREMENTS.md)：请求正式 Metric、主体/单位/时间、度量、声明维度和类型化筛选，`POST /api/requirements/assess` 由系统选择实现、明确歧义并生成受限合法计划；`POST /api/data-tasks` 重新裁决后真实执行。评估按现有不可变观测保存，readiness=UNKNOWN；它不是执行或结果证明。原 v1/v2 接口不变，未登记的 BI 派生不能借原 DIRECT 实现执行。
+
 `POST /api/feedback` 关联 observationId、issueCode、stage、description；作者通过 `/{id}/reviews` 记录 classification/ownerTeam/externalIssueRef/note。用户声明不自动成为根因。
 
 `POST /api/regressions/cases` 关联 observationId、expectedState、expectedFingerprint、referenceBasis、referenceEvidenceRef；审核者 `/{id}/approve` 后，消费者 `/{id}/replays` 以新 idempotencyKey 真实重放。Reviewer `POST /api/feedback/{id}/closures` 必须引用匹配且成功的回归证据。模型、请求范围、政策、物理绑定、实现不一致不能关闭原问题。改变正式语义或政策后需建立新版本参考义务并做显式迁移/业务验收；受审模型替代现由独立迁移协议承载；它不自动证明跨版本等价，也不将新版本回放当成旧版本已修好。具体接口、期望分型和证明边界见 [REPAIR.md](REPAIR.md)。完整字段及反例见 [KnowledgeLoopIntegrationTest](src/test/java/ai/awe/registry/KnowledgeLoopIntegrationTest.java)。
 
-工作台 `/consumption.html` 保留真实 EXTRACT，`/metric-consumption.html` 消费指标并查看阶段/证明，`/knowledge.html` 展示解析、覆盖和修复回归。页面不存储 Token，不默认猜日期，不内置模拟答案。领域问题、角色和来源仍须真实配置。
+工作台 `/consumption.html` 保留真实 EXTRACT，`/metric-consumption.html` 消费固定指标并查看阶段/证明，`/semantic-requirements.html` 评估并执行结构化需求，`/knowledge.html` 展示解析、覆盖和修复回归。页面不存储 Token，不默认猜日期，不内置模拟答案。领域问题、角色和来源仍须真实配置。

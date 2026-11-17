@@ -262,7 +262,11 @@ public class ObligationMigrations {
                     "Migration must start from the exact old feedback obligation and name a distinct new scope");
         if (!oldDoc.path("policyHash").equals(newDoc.path("policyHash")))
             throw new IllegalArgumentException("Model migration cannot change the consumer policy");
-        JsonNode oldTask = task(oldDoc.path("request")), newTask = task(newDoc.path("request"));
+        boolean semantic = oldDoc.path("request").path("protocolVersion").asInt() == 3;
+        if (semantic || newDoc.path("request").path("protocolVersion").asInt() == 3)
+            validateSemanticRevision(oldDoc, newDoc);
+        JsonNode oldTask = task(oldDoc.path("request"), semantic),
+                newTask = task(newDoc.path("request"), semantic);
         if (!oldTask.equals(newTask))
             throw new IllegalArgumentException(
                     "Model migration cannot change the business request, time, purpose, fields or budget");
@@ -313,9 +317,50 @@ public class ObligationMigrations {
                 true);
     }
 
-    private JsonNode task(JsonNode request) {
+    private void validateSemanticRevision(JsonNode oldDocument, JsonNode newDocument) {
+        if (oldDocument.path("request").path("protocolVersion").asInt() != 3
+                || newDocument.path("request").path("protocolVersion").asInt() != 3)
+            throw new IllegalArgumentException(
+                    "Semantic model replacement cannot change the data request protocol");
+        JsonNode oldMetric = semanticMetric(oldDocument), newMetric = semanticMetric(newDocument);
+        // 只有服务端固定的同一指标新发布可从业务请求投影中移除版本指针；不可借此换指标。
+        if (!oldMetric.path("entityId").equals(newMetric.path("entityId"))
+                || oldMetric.path("releaseId").equals(newMetric.path("releaseId"))
+                || ModelCompatibility.Version.parse(newMetric.path("modelVersion").asText())
+                                .compareTo(
+                                        ModelCompatibility.Version.parse(
+                                                oldMetric.path("modelVersion").asText()))
+                        <= 0)
+            throw new IllegalArgumentException(
+                    "Semantic replacement requires a newer published release of the same Metric entity");
+    }
+
+    private JsonNode semanticMetric(JsonNode document) {
+        JsonNode requested = document.path("request").path("metric"),
+                fixed = document.path("resolved").path("metric");
+        if (!KnowledgeJson.uuid(requested, "releaseId")
+                        .toString()
+                        .equals(fixed.path("releaseId").asText())
+                || !KnowledgeJson.hash(requested, "contentHash")
+                        .equals(fixed.path("contentHash").asText())
+                || fixed.path("entityId").asText().isBlank())
+            throw new IllegalArgumentException(
+                    "Semantic request does not match its server-pinned Metric release");
+        // 重读不可变发布证明实体和版本；不信任调用方的版本/模型身份声明。
+        var release = registry.release(UUID.fromString(fixed.path("releaseId").asText()));
+        if (!"Metric".equals(release.get("entity_type"))
+                || !fixed.path("entityId").asText().equals(release.get("entity_id"))
+                || !fixed.path("modelVersion").asText().equals(release.get("version"))
+                || !fixed.path("contentHash").asText().equals(release.get("content_hash")))
+            throw new IllegalArgumentException(
+                    "Semantic replacement Metric identity differs from its immutable release");
+        return fixed;
+    }
+
+    private JsonNode task(JsonNode request, boolean semantic) {
         var result = ((ObjectNode) request).deepCopy();
         result.remove(List.of("proposedFunction", "idempotencyKey", "externalTaskRef"));
+        if (semantic) result.remove(List.of("metric", "candidateFunction"));
         return result;
     }
 

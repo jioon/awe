@@ -50,6 +50,8 @@ DATA_OUTCOME 通过标记为 `REVIEWED_EXPECTED_OUTCOME`，**不能作为数据�
 
 前提：旧反馈已由作者归因为 MODEL_GAP；旧、新 DATA_RESULT 参考分别批准。两者期望状态/Fingerprint 一致，主体、政策、业务请求和输出语义不变；目标使用同 Function 实体更高发布版本。
 
+QUERY_METRIC v3 的模型修订还要求同一 Metric 实体的更高版本及不同发布。服务端核对原/新请求的 metric Release/Hash 与各自执行时固定的模型一致，并重读不可变发布证明实体和版本，然后才允许比较业务要求时忽略 metric/candidateFunction 版本指针。所有 requirements（包括时间、度量、维度、筛选、主体、单位、时区和时间角色）、用途及预算保持不变。较高 Function 版本不能借此更换 Metric 或降低其版本；v2/v3 之间不作为同一替代协议迁移。
+
 | 接口 | 身份与内容 |
 |---|---|
 | `POST /api/feedback/{fid}/migrations` | 消费者：fromCaseId、toCaseId、reason、referenceEvidenceRef、idempotencyKey |

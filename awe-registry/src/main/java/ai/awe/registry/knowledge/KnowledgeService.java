@@ -440,6 +440,8 @@ public class KnowledgeService {
             throw new NoSuchElementException(
                     "Resolution observation is outside the current data policy");
         JsonNode original = json.parse((String) rows.getFirst().get("request_doc"));
+        if (original.path("protocolVersion").asInt() == 3)
+            return operations.requirementAssessment(id, grant);
         if (original.has("domain") && !domains(grant).contains(original.path("domain").asText()))
             throw new NoSuchElementException(
                     "Resolution observation is outside current discovery scope");

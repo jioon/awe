@@ -43,7 +43,13 @@ final class RepairRegressionIntegrationTest extends MetricQueryTestSupport {
                     "function.repair.other",
                     "function.repair.readiness");
     private static SqlBackedMetricGateway gateway;
-    private JsonNode original, corrected, changedUnit, other, readinessFunction;
+    private JsonNode original,
+            corrected,
+            changedUnit,
+            other,
+            readinessFunction,
+            crossMetricFunction,
+            downgradedMetricFunction;
 
     private static synchronized SqlBackedMetricGateway gateway() {
         if (gateway == null) {
@@ -126,6 +132,8 @@ final class RepairRegressionIntegrationTest extends MetricQueryTestSupport {
         changedUnit = populationVersion("population", "3.0.0", false, "devices");
         populationVersion("other", "1.0.0", true, "users");
         other = populationVersion("other", "2.0.0", false, "users");
+        crossMetricFunction = populationImplementation("4.0.0", "other", "2.0.0");
+        downgradedMetricFunction = populationImplementation("5.0.0", "population", "1.0.0");
         var readinessMetric =
                 publish(
                         "Metric",
@@ -154,6 +162,20 @@ final class RepairRegressionIntegrationTest extends MetricQueryTestSupport {
         readinessFunction =
                 publish("FunctionDefinition", queryFunctionSpec(REPAIR_DOMAIN, "readiness", true));
         gateway().bindMetric(READINESS_CAPABILITY, readinessMetric);
+    }
+
+    private JsonNode populationImplementation(
+            String version, String metricName, String metricVersion) throws Exception {
+        var function = queryFunctionSpec(REPAIR_DOMAIN, "population", false);
+        ((ObjectNode) function.path("model").path("ref")).put("modelVersion", version);
+        ((ObjectNode) function.path("model").path("ownerType"))
+                .put("id", "metric." + REPAIR_DOMAIN + "." + metricName)
+                .put("modelVersion", metricVersion);
+        ((ObjectNode) function.path("model"))
+                .put(
+                        "resultSchemaRef",
+                        "metric." + REPAIR_DOMAIN + "." + metricName + "@" + metricVersion);
+        return publish("FunctionDefinition", function);
     }
 
     private JsonNode populationVersion(String name, String version, boolean nativeOnly, String unit)
@@ -207,6 +229,58 @@ final class RepairRegressionIntegrationTest extends MetricQueryTestSupport {
 
     private JsonNode execute(JsonNode function) throws Exception {
         return ok("POST", "/api/data-tasks", CONSUMER, metricRequest(function, key()));
+    }
+
+    private ObjectNode semanticRequest(JsonNode function) throws Exception {
+        JsonNode capability = null;
+        for (var candidate : ok("GET", "/api/capabilities", CONSUMER, null))
+            if (candidate.path("releaseId").asText().equals(function.path("id").asText()))
+                capability = candidate;
+        assertNotNull(
+                capability, "The current consumer must discover the exact metric implementation");
+        var request = metricRequest(function, key());
+        var proposed = request.remove("proposedFunction");
+        request.put("protocolVersion", 3);
+        request.set("candidateFunction", proposed);
+        request.set(
+                "metric",
+                json.parse(
+                        json.write(
+                                Map.of(
+                                        "releaseId",
+                                                capability
+                                                        .path("metric")
+                                                        .path("releaseId")
+                                                        .asText(),
+                                        "contentHash",
+                                                capability
+                                                        .path("metric")
+                                                        .path("contentHash")
+                                                        .asText()))));
+        var requirements = (ObjectNode) request.path("requirements");
+        requirements.set(
+                "statisticalSubject",
+                json.parse(
+                        json.write(
+                                Map.of(
+                                        "entityId",
+                                                capability
+                                                        .path("statisticalSubject")
+                                                        .path("entityId")
+                                                        .asText(),
+                                        "modelVersion",
+                                                capability
+                                                        .path("statisticalSubject")
+                                                        .path("modelVersion")
+                                                        .asText()))));
+        requirements.put("unit", capability.path("contract").path("unit").asText());
+        requirements.put("businessZone", capability.path("contract").path("businessZone").asText());
+        requirements.put("timeRole", capability.path("contract").path("timeRole").asText());
+        requirements.putArray("measures").add("value");
+        requirements.putArray("dimensions");
+        requirements.putArray("filters");
+        requirements.put("verification", "OBSERVE");
+        return request;
     }
 
     private String independentPopulationFingerprint() {
@@ -302,6 +376,150 @@ final class RepairRegressionIntegrationTest extends MetricQueryTestSupport {
 
     private String migrationsPath(JsonNode feedback) {
         return "/api/feedback/" + feedback.path("id").asText() + "/migrations";
+    }
+
+    @Test
+    void semanticRevisionFlowsThroughReviewedReplacementAndFreshActualReplay() throws Exception {
+        String expected = independentPopulationFingerprint();
+        var oldOperation = ok("POST", "/api/data-tasks", CONSUMER, semanticRequest(original));
+        var newOperation = ok("POST", "/api/data-tasks", CONSUMER, semanticRequest(corrected));
+        assertEquals("QUERIED", oldOperation.path("status").asText(), oldOperation.toString());
+        assertEquals("QUERIED", newOperation.path("status").asText(), newOperation.toString());
+        assertEquals(2, oldOperation.path("result").path("rows").get(0).path("value").asInt());
+        assertEquals(3, newOperation.path("result").path("rows").get(0).path("value").asInt());
+        var issue = reportModelProblem(oldOperation);
+        var oldCase = reference(oldOperation, expected, CONSUMER);
+        var newCase = reference(newOperation, expected, CONSUMER);
+        approveCase(oldCase);
+        approveCase(newCase);
+        var failed = replay(oldCase);
+        assertFalse(failed.path("passed").asBoolean(), failed.toString());
+        var early = replay(newCase);
+        assertTrue(early.path("passed").asBoolean(), early.toString());
+        var migration =
+                ok("POST", migrationsPath(issue), CONSUMER, migrationRequest(oldCase, newCase));
+        var comparison = migration.path("proposal").path("comparison");
+        assertFalse(comparison.path("request").has("candidateFunction"));
+        assertFalse(comparison.path("request").has("metric"));
+        assertEquals(
+                oldOperation.path("request").path("requirements"),
+                comparison.path("request").path("requirements"));
+        assertEquals(
+                "metric.repair.population",
+                comparison.path("oldModelsAndBindings").path("metric").path("entityId").asText());
+        assertEquals(
+                "metric.repair.population",
+                comparison.path("newModelsAndBindings").path("metric").path("entityId").asText());
+        String path = migrationsPath(issue) + "/" + migration.path("id").asText();
+        ok(
+                "POST",
+                path + "/approve",
+                REVIEWER,
+                Map.of("migrationHash", migration.path("migrationHash").asText()));
+        assertEquals(
+                400,
+                send(
+                                "POST",
+                                path + "/resolve",
+                                REVIEWER,
+                                Map.of(
+                                        "replayId",
+                                        early.path("id").asText(),
+                                        "note",
+                                        "Pre-approval replay is not a replacement acceptance"))
+                        .statusCode());
+        var fresh = replay(newCase);
+        assertTrue(fresh.path("passed").asBoolean(), fresh.toString());
+        var resolved =
+                ok(
+                        "POST",
+                        path + "/resolve",
+                        REVIEWER,
+                        Map.of(
+                                "replayId",
+                                fresh.path("id").asText(),
+                                "note",
+                                "The exact v3 business requirements pass the independent reference after the approved Metric revision"));
+        assertEquals(
+                "RESOLVED_BY_REPLACEMENT", resolved.path("status").asText(), resolved.toString());
+        var preserved =
+                ok("GET", "/api/data-tasks/" + oldOperation.path("id").asText(), CONSUMER, null);
+        assertEquals(oldOperation.path("request"), preserved.path("request"));
+        assertEquals(2, preserved.path("result").path("rows").get(0).path("value").asInt());
+        assertFalse(
+                ok("GET", "/api/regressions/replays/" + failed.path("id").asText(), CONSUMER, null)
+                        .path("passed")
+                        .asBoolean());
+    }
+
+    @Test
+    void semanticMigrationRejectsMetricSwapDowngradeRequestChangesAndProtocolChanges()
+            throws Exception {
+        String expected = independentPopulationFingerprint();
+        var oldOperation = ok("POST", "/api/data-tasks", CONSUMER, semanticRequest(original));
+        var issue = reportModelProblem(oldOperation);
+        var oldCase = reference(oldOperation, expected, CONSUMER);
+        approveCase(oldCase);
+        var changedTime = semanticRequest(corrected);
+        ((ObjectNode) changedTime.path("requirements")).put("from", "2026-08-18T01:00:00Z");
+        var normalNew = ok("POST", "/api/data-tasks", CONSUMER, semanticRequest(corrected));
+        var swapped = ok("POST", "/api/data-tasks", CONSUMER, semanticRequest(crossMetricFunction));
+        assertEquals(
+                oldOperation.path("resolved").path("function").path("entityId"),
+                swapped.path("resolved").path("function").path("entityId"));
+        assertNotEquals(
+                oldOperation.path("resolved").path("metric").path("entityId"),
+                swapped.path("resolved").path("metric").path("entityId"));
+        var variants =
+                List.of(
+                        reference(swapped, expected, CONSUMER),
+                        reference(
+                                ok("POST", "/api/data-tasks", CONSUMER, changedTime),
+                                expected,
+                                CONSUMER),
+                        reference(
+                                ok(
+                                        "POST",
+                                        "/api/data-tasks",
+                                        CONSUMER,
+                                        semanticRequest(changedUnit)),
+                                expected,
+                                CONSUMER),
+                        reference(
+                                normalNew, json.sha256(json.parse("[{\"value\":999}]")), CONSUMER),
+                        reference(execute(corrected), expected, CONSUMER));
+        for (var candidate : variants) {
+            approveCase(candidate);
+            assertEquals(
+                    400,
+                    send(
+                                    "POST",
+                                    migrationsPath(issue),
+                                    CONSUMER,
+                                    migrationRequest(oldCase, candidate))
+                            .statusCode(),
+                    "A newer Function cannot swap the formal Metric, business request, answer, unit or protocol");
+        }
+        var currentIssue = reportModelProblem(normalNew);
+        var currentCase = reference(normalNew, expected, CONSUMER);
+        var downgrade =
+                ok("POST", "/api/data-tasks", CONSUMER, semanticRequest(downgradedMetricFunction));
+        assertEquals(
+                "5.0.0", downgrade.path("resolved").path("function").path("modelVersion").asText());
+        assertEquals(
+                "1.0.0", downgrade.path("resolved").path("metric").path("modelVersion").asText());
+        var downgradedCase = reference(downgrade, expected, CONSUMER);
+        approveCase(currentCase);
+        approveCase(downgradedCase);
+        assertEquals(
+                400,
+                send(
+                                "POST",
+                                migrationsPath(currentIssue),
+                                CONSUMER,
+                                migrationRequest(currentCase, downgradedCase))
+                        .statusCode(),
+                "A higher Function version cannot hide a Metric downgrade");
     }
 
     @Test
